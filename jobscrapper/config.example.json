@@ -1,0 +1,72 @@
+{
+    "browser_path": "",
+    "kafka_bootstrap": "broker:19092",
+    "skill_list": "datasets/skills.csv",
+    "majors_list": "datasets/majors.csv",
+    "portals": {
+        "jobstreet": {
+            "enable": true,
+            "target_market": [
+                {
+                    "keywoard": "backend",
+                    "locations": [
+                        "surabaya", "malang", "jakarta", "bandung", "yogyakarta", "sidoarjo"
+                    ]
+                },
+                {
+                    "keywoard": "data engineer",
+                    "locations": [
+                        "surabaya", "malang", "jakarta", "bandung", "yogyakarta", "sidoarjo"
+                    ]
+                },
+                {
+                    "keywoard": "data scientist",
+                    "locations": [
+                        "surabaya", "malang", "jakarta", "bandung", "yogyakarta", "sidoarjo"
+                    ]
+                },
+                {
+                    "keywoard": "golang",
+                    "locations": [
+                        "surabaya", "malang", "jakarta", "bandung", "yogyakarta", "sidoarjo"
+                    ]
+                },
+                {
+                    "keywoard": "engineer",
+                    "locations": [
+                        "surabaya", "malang", "jakarta", "bandung", "yogyakarta", "sidoarjo"
+                    ]
+                }                
+            ]
+        },
+        "glints": {
+            "enable": true,
+            "target_market": [
+                {
+                    "keywoard": "backend",
+                    "location_ids": [
+                        "0822446a-8784-4af4-bc88-9f9294fca382",
+                        "JABODETABEK",
+                        "6ec28332-761a-4ee9-b0d8-52171a170edf"
+                    ]
+                }
+            ]
+        },
+        "disnakerja": {
+            "target_keywoard": [
+                "backend",
+                "data sciencetist",
+                "data engineer"
+            ]
+        },
+        "linkedin": {
+            "priv": {
+                "APISID": "",
+                "li_at": ""
+            }
+        },
+        "maganghub": {
+            
+        }
+    }
+}

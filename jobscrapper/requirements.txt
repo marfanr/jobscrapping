@@ -1,0 +1,6 @@
+requests
+playwright
+kafka-python
+pandas
+spacy
+playwright_stealth
