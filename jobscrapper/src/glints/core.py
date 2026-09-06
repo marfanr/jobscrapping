@@ -15,9 +15,6 @@ class GlintsScrapper:
         self._processed_jobs = set()
         
     async def execute(self):
-        self.scrapper.spawn(self.job())
-    
-    async def job(self):
         print("Glints Scrapper Job Started")
         portal_config = self.config["portals"]
         if 'glints' not in portal_config.keys():
@@ -36,6 +33,8 @@ class GlintsScrapper:
             random.shuffle(locations_ids)
             for loc in locations_ids:
                 await self.scrap_job(keywoard, loc)        
+
+        print("glints scrapperdone")
         
     
     async def scrap_job(self, keywoard, location_id):
