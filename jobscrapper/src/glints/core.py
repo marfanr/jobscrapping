@@ -113,7 +113,8 @@ class GlintsScrapper:
                 "publisher": {
                     "name": hrd_acc_name,
                     "last_online": lastonline
-                },   
+                },
+                "company": company_name
             }
     
             # publish kafka

@@ -137,6 +137,7 @@ class JobStreetScrapper:
             details_content = await details.inner_text()
             
             gathered_job = {
+                "company": company,
                 "job_name": job_name,
                 "url": job_url,
                 "salary": salary,

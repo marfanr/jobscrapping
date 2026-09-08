@@ -1,11 +1,11 @@
 from .jobscrapper import Jobscrapper
-# from . import jobstreet
+from . import jobstreet
 from .worker import Worker
 from . import glints
 
 __name__ = [
     Jobscrapper,
-    # jobstreet,
+    jobstreet,
     Worker,
     glints
 ]

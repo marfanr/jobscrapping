@@ -12,6 +12,7 @@ class Jobscrapper:
             self.config = json.load(file)
 
         self.playw = None
+        self.playw_original = None  # Store original playwright instance
         self.browser = None
         self.context = None
         self.bg_task: set[asyncio.Task] = set()
@@ -33,6 +34,7 @@ class Jobscrapper:
 
     async def run_async(self):
         playw = await async_playwright().start()
+        self.playw_original = playw  # Store original for cleanup
         stealth = Stealth()
         self.playw = stealth.use_async(playw)
 
@@ -57,7 +59,7 @@ class Jobscrapper:
                     print(f"[JOB ERROR] {e}")
 
             # Wait with graceful timeout
-            await self._wait_tasks(timeout=300)  # 5 min graceful wait
+            await self._wait_tasks()
 
         except KeyboardInterrupt:
             print("Shutdown signal received, cleaning up...")
@@ -65,16 +67,17 @@ class Jobscrapper:
         finally:
             await self._cleanup(timeout=30, force_after=False)
 
-    async def _wait_tasks(self, timeout=300):
-        """Wait for all tasks to complete gracefully"""
-        try:
-            await asyncio.wait_for(
-                asyncio.gather(*self.bg_task, return_exceptions=True),
-                timeout=timeout
-            )
-        except asyncio.TimeoutError:
-            print(f"Tasks timeout after {timeout}s, forcing cancel...")
-            await self._cleanup(timeout=10, force_after=True)
+    async def _wait_tasks(self):
+        if self.bg_task:
+            print(f"Waiting for {len(self.bg_task)} tasks to complete...")
+            results = await asyncio.gather(*self.bg_task, return_exceptions=True)
+            
+            # Log any errors
+            for i, result in enumerate(results):
+                if isinstance(result, Exception):
+                    print(f"Task {i} failed: {result}")
+        else:
+            print("No tasks to wait for")
     
     def spawn(self, task: Coroutine):
         task_obj = asyncio.create_task(task)
@@ -88,7 +91,6 @@ class Jobscrapper:
             if not task.done():
                 task.cancel()
         
-        # Give tasks time to cleanup (finally blocks, close pages, etc)
         try:
             await asyncio.wait_for(
                 asyncio.gather(*self.bg_task, return_exceptions=True),
@@ -102,28 +104,27 @@ class Jobscrapper:
         
         self.bg_task.clear()
 
-        # Cleanup Playwright in reverse order
         if self.context:
             try:
-                await asyncio.wait_for(self.context.close(), timeout=10)
+                await asyncio.wait_for(self.context.close(), timeout=5)
             except Exception as e:
-                print(f"[CLEANUP] Context error: {e}")
+                print(f"[CLEANUP] Context close error: {e}")
             finally:
                 self.context = None
 
         if self.browser:
             try:
-                await asyncio.wait_for(self.browser.close(), timeout=10)
+                await asyncio.wait_for(self.browser.close(), timeout=5)
             except Exception as e:
-                print(f"[CLEANUP] Browser error: {e}")
+                print(f"[CLEANUP] Browser close error: {e}")
             finally:
                 self.browser = None
 
-        if hasattr(self, 'playw_original') and self.playw_original:
+        if self.playw_original:
             try:
                 await asyncio.wait_for(self.playw_original.stop(), timeout=10)
             except Exception as e:
-                print(f"[CLEANUP] Playwright error: {e}")
+                print(f"[CLEANUP] Playwright stop error: {e}")
             finally:
                 self.playw_original = None
                 self.playw = None
