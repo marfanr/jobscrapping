@@ -4,7 +4,7 @@ import argparse
 
 def main():    
     parser = argparse.ArgumentParser(prog="jobscrapper")
-    parser.add_argument("mode", default="scrap", choices=["scrap","worker"])
+    parser.add_argument("mode", default="scrap", choices=["scrap","worker", "insight"])
     parser.add_argument("--config", type=str, default="config.json")
     args = parser.parse_args()
     
@@ -16,8 +16,11 @@ def main():
         
     elif args.mode == "worker":
         worker = src.Worker(args.config)
-        worker.run()
+        worker.run()    
     
+    elif args.mode  =="insight":
+        insight = src.Insight(args.config)
+        insight.run()
 
 if __name__ == "__main__":
     main()
