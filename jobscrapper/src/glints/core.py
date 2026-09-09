@@ -72,7 +72,7 @@ class GlintsScrapper:
         linkloc = job.locator("a[aria-label^='Job card title:']")
         link = "https://glints.com" + await linkloc.first.get_attribute('href')
         salary = await get_text(job.locator("span[class*='SalaryWrapper']"))
-        location = await get_text(job.locator("span[class^='CardJobLocation__LocationWrapper']"))
+        location = await get_text(job.locator("div[class^='CardJobLocation__LocationWrapper']"))
         
         newpage = await context.new_page()
         try:
@@ -119,7 +119,7 @@ class GlintsScrapper:
     
             # publish kafka
             self.scrapper.producer.send('rawjobs', gathered_job)
-            print("glints done")
+            print(f"glints : {location}")
             self._processed_jobs.add((job_name, company_name))
         
         finally:
