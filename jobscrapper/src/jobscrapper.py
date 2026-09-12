@@ -45,7 +45,7 @@ class Jobscrapper:
 
             self.browser = await playw.chromium.launch(
                 executable_path=browser_path,
-                headless=False,
+                headless=True,
                 args=[
                     "--start-minimized",
                     "--no-sandbox",

@@ -9,11 +9,13 @@ import random
 
 @registerJob("jobstreet")
 class JobStreetScrapper:
-    def __init__(self, scrapper: Jobscrapper):
+    def __init__(
+        self,
+        scrapper: Jobscrapper
+    ):
         self.config = scrapper.config
         self.scrapper = scrapper
         
-         
     async def execute(self):
         portal_config = self.config["portals"]
         if 'jobstreet' not in portal_config.keys():
