@@ -15,7 +15,6 @@ class GlintsScrapper:
         self._processed_jobs = set()
         
     async def execute(self):
-        print("Glints Scrapper Job Started")
         portal_config = self.config["portals"]
         if 'glints' not in portal_config.keys():
             return
@@ -33,9 +32,6 @@ class GlintsScrapper:
             random.shuffle(locations_ids)
             for loc in locations_ids:
                 await self.scrap_job(keywoard, loc)        
-
-        print("glints scrapperdone")
-        
     
     async def scrap_job(self, keywoard, location_id):
         page = await self.scrapper.context.new_page()
@@ -57,12 +53,12 @@ class GlintsScrapper:
             articles = page.locator("[role='article']")
             
             for article in await articles.all():
-                await self.gather_job_data(article, self.scrapper.context)
+                await self.gather_job_data(article, self.scrapper.context, keywoard)
         
         finally:    
             await page.close()
             
-    async def gather_job_data(self, job: Locator, context):
+    async def gather_job_data(self, job: Locator, context, keywoard):
         job_name = await get_text(job.locator("h2"))
         company_name = await get_text(job.locator("a[aria-label^='Job card company name:']"))
         if (job_name, company_name) in self._processed_jobs:
@@ -71,6 +67,7 @@ class GlintsScrapper:
         listed_time = await get_text(job.locator("p[data-recent='false']"))
         linkloc = job.locator("a[aria-label^='Job card title:']")
         link = "https://glints.com" + await linkloc.first.get_attribute('href')
+        
         salary = await get_text(job.locator("span[class*='SalaryWrapper']"))
         location = await get_text(job.locator("div[class^='CardJobLocation__LocationWrapper']"))
         
@@ -114,12 +111,12 @@ class GlintsScrapper:
                     "name": hrd_acc_name,
                     "last_online": lastonline
                 },
-                "company": company_name
+                "company": company_name,
+                "keywoard": str.lower(keywoard)
             }
     
             # publish kafka
             self.scrapper.producer.send('rawjobs', gathered_job)
-            print(f"glints : {location}")
             self._processed_jobs.add((job_name, company_name))
         
         finally:

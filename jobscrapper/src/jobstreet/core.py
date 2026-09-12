@@ -6,7 +6,6 @@ from ..loader import registerJob
 from ..jobscrapper import Jobscrapper
 from ..utils import get_text
 import random
-import requests
 
 @registerJob("jobstreet")
 class JobStreetScrapper:
@@ -45,16 +44,16 @@ class JobStreetScrapper:
         page = await self.scrapper.context.new_page()
         try:
             job = keywoard.replace(' ', '-')
-            print(job)
+            url = f"https://id.jobstreet.com/id/{job}-jobs/in-{location}?page=1"
             await page.goto(
-                f"https://id.jobstreet.com/id/{job}-jobs/in-{location}?page=1",
+                url,
                 wait_until="domcontentloaded",
                 timeout=60000
             )
+            print(url)
             
             await page.wait_for_selector("#app", timeout=60000, state="attached")
-            print("title", await page.title())
-            
+        
             # Total jobs
             job_count_el = page.locator(
                 "[data-automation='totalJobsMessage'] span"
@@ -66,8 +65,6 @@ class JobStreetScrapper:
                 job_count = int(job_count_text.split(" ")[0])
             else:
                 job_count = 0
-
-            print(f"found {job_count} jobs")
             
             if job_count < 0:
                 return
@@ -81,7 +78,7 @@ class JobStreetScrapper:
             print(f"found result job list {count}")
 
             for job in await job_lists.all():
-                await self.gather_job_data(job, self.scrapper.context)
+                await self.gather_job_data(job, self.scrapper.context, keywoard)
 
         except asyncio.CancelledError:
             pass
@@ -89,7 +86,7 @@ class JobStreetScrapper:
         finally:
             await page.close()
             
-    async def gather_job_data(self, job: Locator, context):
+    async def gather_job_data(self, job: Locator, context, keywoard):
         job_name = await get_text(
                     job.locator("h3")
                 )
@@ -145,10 +142,9 @@ class JobStreetScrapper:
                 "highlights": highlights,
                 "listing_date": joblisting_date,
                 "details": details_content,
-                "source": "jobstreet"
+                "source": "jobstreet",
+                "keywoard": str.lower(keywoard)
             }
-            
-            print("jobstreet done")
             
             # publish kafka
             self.scrapper.producer.send('rawjobs', gathered_job)
