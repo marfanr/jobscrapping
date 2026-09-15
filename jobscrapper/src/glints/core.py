@@ -104,9 +104,9 @@ class GlintsScrapper:
                 "listing_date": listed_time,
                 "details": jobdesc,
                 "source": "glints",
-                "requirements": list(requirements),
-                "skills": list(skills),
-                "benefits": list(benefits),
+                "requirements": ", ".join(list(requirements)),
+                "skills": ", ".join(list(skills)),
+                "benefits": ", ".join(list(benefits)),
                 "publisher": {
                     "name": hrd_acc_name,
                     "last_online": lastonline
@@ -114,7 +114,7 @@ class GlintsScrapper:
                 "company": company_name,
                 "keywoard": str.lower(keywoard)
             }
-    
+            
             # publish kafka
             self.scrapper.producer.send('rawjobs', gathered_job)
             self._processed_jobs.add((job_name, company_name))

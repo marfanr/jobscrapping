@@ -6,8 +6,10 @@ A job portal scraping and analytics pipeline focused on specific job fields and 
 
 * JobStreet
 * Glints
-* LinkedIn (credentials required)
+* LinkedIn (zenrwos key required)
 
+## NOTE:
+- for linkedin, dont using a your main account, and change your langguage in linkedin settings into `Bahasa Indonesia` for detecting provinces
 
 ## Features
 

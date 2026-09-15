@@ -207,7 +207,7 @@ class LinkedinScrapper:
             "listing_date": listed_date,
             "details": details,
             "source": "linkedin",
-            "requirements": list(requirements),
+            "requirements": ", ".join(list(requirements)),
             "highlights": job_criteria_list,
             "publisher": {
                 "name": recruiter_name,
