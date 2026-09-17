@@ -15,22 +15,30 @@ class MaganghubScrapper:
         self.config = scrapper.config
         self.scrapper = scrapper
         self.maganghub_cities = self.get_cities()
+        self.maganghub_provinces = self.get_provinces()
         self.base_url = "https://maganghub.kemnaker.go.id"
 
     def get_cities(self):
         url = "https://api.kemnaker.go.id/maganghub/onboarding/v2/cities"
-
         response = requests.get(
             url,
             params={"limit": 10000},
             timeout=30,
         )
-
         response.raise_for_status()
-
         payload = response.json()
-
         return payload.get("data", [])
+
+    def get_provinces(self):
+            url = "https://api.kemnaker.go.id/maganghub/onboarding/v2/provinces"
+            response = requests.get(
+                url,
+                params={"limit": 10000},
+                timeout=30,
+            )
+            response.raise_for_status()
+            payload = response.json()
+            return payload.get("data", [])
 
     async def execute(self):
         portal_config = self.config["portals"]
@@ -52,6 +60,8 @@ class MaganghubScrapper:
                 try:
                     print(keyword, loc)
                     await self.scrap_job(keyword, loc)
+                except KeyboardInterrupt:
+                    print(f"stopped")
                 except Exception as e:
                     print(f"error ... {e}\n")
 
@@ -60,6 +70,13 @@ class MaganghubScrapper:
         for _, v in enumerate(self.maganghub_cities):
             if location in v["name"]:
                 loc_obj = v
+                
+        prov_id = loc_obj["province_id"]
+        prov_obj = None
+        for _, v in enumerate(self.maganghub_provinces):
+            if prov_id in v["id"]:
+                prov_obj = v
+        
 
         page = await self.scrapper.context.new_page()
         try:
@@ -94,23 +111,25 @@ class MaganghubScrapper:
                     job_name = await get_text(c.locator("h3"))
                     company = await get_text(c.locator("p.text-foreground"))
                     field = await get_text(c.locator("p.truncate"))
+                    
                     spans = c.locator(".text-muted-foreground")
                     works_day = await get_text(spans.locator("span.flex").nth(2))
                     href = "https://maganghub.kemnaker.go.id" + "".join(await c.get_attribute("href"))
                     quota_el = c.locator("div.inline-flex.items-center")
                     quota = await get_text(quota_el.first)
-                    applied = await get_text(quota_el.nth(1))
+                    applicant = await get_text(quota_el.nth(1))
                     if "Ramah Disabilitas" in quota:
                         quota = await get_text(quota_el.nth(1))
-                        applied = await get_text(quota_el.nth(2))
+                        applicant = await get_text(quota_el.nth(2))
 
                     print(
                         f"job name: {job_name}\n"
                         f"company name : {company}\n"
+                        f"lokasi : {prov_obj['name']}\n"
                         f"Field : {field}\n"
                         f"works day: {works_day}\n"
                         f"link: {href}\n"
-                        f"quota: {quota}, apply: {applied}\n"
+                        f"quota: {quota}, apply: {applicant}\n"
                         "\n"
                     )
                     
@@ -121,7 +140,8 @@ class MaganghubScrapper:
                         field=field,
                         works_day=works_day,
                         quota=quota,
-                        applied=applied
+                        applicant=applicant,
+                        location=prov_obj['name']
                     )
 
         finally:
@@ -137,13 +157,15 @@ class MaganghubScrapper:
         field: str,
         works_day: str,
         quota: int,
-        applied: int
+        applicant: int,
+        location: str
         ):
         page = await self.scrapper.context.new_page()
         try:
             await page.goto(link, wait_until="domcontentloaded", timeout=60000)
             
-            requirements = ""
+            details = ""
+            requirements = set()
             
             containers_loc = page.locator("div.mh-container.py-8 section")
             for c in await containers_loc.all():
@@ -152,13 +174,14 @@ class MaganghubScrapper:
                     if "Deskripsi Lowongan" in h2:
                         content = await c.locator("p").first.inner_text()
                         print(f"deskrips: {content}\n")
+                        details += content
                     
                     elif "Kualifikasi" in h2:
                         content = await c.locator("span.text-muted-foreground").all_inner_texts()
-                        print(f"kualifikasi: {content}\n")     
+                        for c in content:
+                            requirements.add(c)   
                         
                     elif "Skill yang Bakal Kamu Dapat" in h2:
-                        print("benefit:")
                         items = c.locator("div.flex.items-start.gap-3.p-3")
                         for i in await items.all():
                             name = await i.locator("div.text-sm.font-medium").inner_text()
@@ -166,29 +189,26 @@ class MaganghubScrapper:
                             tipe = await flex.locator("span.capitalize").inner_text()
                             timeline = await get_text(flex.locator("span").nth(1))
                             content = await get_text(i.locator("p.text-xs.text-muted-foreground"))
-                            
-                            print(f"name: {name}\n {tipe} - {timeline}\n{content}\n")
+
+                            details += f"{name}\n{tipe}-{timeline}\n{content}\n\n"
                             
                     elif "Lokasi Magang" in h2:
                         loc =  c.locator("iframe[title='Google Map Embed']")
                         location = None
                         if await loc.count() > 0:
-                            print(f"loc: {await loc.get_attribute("src")}\n")
-                            
+                            details += await loc.get_attribute("src")                            
+                               
             gathered_job = {
                 "job_name": job_name,
                 "url": link,
                 "location": location,
-                # "details": details,
+                "details": details,
                 "source": "linkedin",
-                # "requirements": list(requirements),
-                # "highlights": job_criteria_list,
-                "publisher": {
-                    # "name": recruiter_name,
-                    # "last_online": recruiter_link
-                },
+                "requirements": ", ".join(list(requirements)),
                 "company": company_name,
-                # "keywoard": str.lower(keyword)
+                "keywoard": str.lower(field),
+                "applicant": applicant,
+                "quota": quota
             }
 
             # publish kafka
