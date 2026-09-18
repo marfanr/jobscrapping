@@ -6,7 +6,8 @@ from .etl import ETL
 import pandas as pd
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
-from .db import Silvers
+from .silvers import Silvers
+from .bronze import Bronze
 
 class Worker:
     def __init__(self, config_path: str):
@@ -20,7 +21,9 @@ class Worker:
             value_deserializer=JsonSerializer(),
             group_id="rawjobs"
         )
+        
         self.silvers = Silvers(self.config)
+        self.bronze = Bronze(self.config)
                 
         self.skill_list = None
         if self.config["skill_list"] is not None:
@@ -35,10 +38,10 @@ class Worker:
     
     def run(self):
         try:
-            print("Scrapper run")
+            print("Worker run")
             asyncio.run(self.run_async())
         except KeyboardInterrupt:
-            print("Scraper stopped.")
+            print("Worker stopped.")
 
     async def run_async(self):
         for record in self.consumer:
@@ -50,9 +53,50 @@ class Worker:
             return data[key]
         else:
             return None
+    
+    def parse_listing_date(self, listing_date: str | None):
+        if not listing_date:
+            return None
+
+        listing_date = re.sub(r"\s+", " ", listing_date.strip().lower())
+
+        timezone = self.config["timezone"] or "Asia/Jakarta"
+        now = datetime.now(ZoneInfo(timezone))
+
+        # hari ini
+        if listing_date == "hari ini":
+            return now
+
+        # kemarin
+        if listing_date == "kemarin":
+            return now - timedelta(days=1)
+
+        # X jam yang lalu
+        match = re.search(
+            r"(\d+)\+?\s*jam\s+yang\s+lalu",
+            listing_date
+        )
+
+        if match:
+            hours = int(match.group(1))
+            return now - timedelta(hours=hours)
+
+        # X hari yang lalu
+        match = re.search(
+            r"(\d+)\+?\s*hari\s+yang\s+lalu",
+            listing_date
+        )
+
+        if match:
+            days = int(match.group(1))
+            return now - timedelta(days=days)
+
+        print(f"Unknown listing date format: {listing_date}")
+        return None
         
     async def listen_rawjobs(self, record):
         print(f"job name: {record['job_name']}")
+        
         details = self._try_get(record, "details")
         salary = self._try_get(record, "salary")
         location = self._try_get(record, "location")
@@ -64,6 +108,17 @@ class Worker:
         benefits = self._try_get(record, "benefits")
         data = self.etl.extract(details)
         company = self._try_get(record, "company")
+        keyword = self._try_get(record, "keywoard")
+        applicant = self._try_get(record, "applicant")
+        quota = self._try_get(record, "quota")
+        
+        
+        if company is None:
+            return
+        
+        
+        # save raw data
+        self.bronze.save_raw(record, source, keyword)
         
         normalized_salary = []
         if salary is not None:
@@ -93,16 +148,7 @@ class Worker:
         else:
             normalized_salary = None
             
-        formated_listing_date = None
-        if listing_date is not None:
-            if "hari yang lalu" in listing_date:
-                date_ = re.findall(r"\d[\d.]*", listing_date)
-                if date_ is not None and len(date_) > 0:
-                    date__ = int(date_[0])
-                    formated_listing_date = datetime.now(tz=ZoneInfo("Asia/Jakarta")) - timedelta(days=date__)
-            else:
-                print(f"unkown format {listing_date}")
-            
+        formated_listing_date = self.parse_listing_date(listing_date)
         
         skills_ = []
         if skills is not None:
@@ -110,16 +156,8 @@ class Worker:
         if data['skills'] is not None:
             skills_.extend(l for l in data['skills'])
             
-        print(f"extracted data: {data}\n"
-            f"salary: {salary} -> {normalized_salary}\n",
-            f"location: {location}\n",
-            f"highlights: {highlights}\n",
-            f"listing_date: {formated_listing_date}\n"
-            f"data: {data}\n"
-            f"source: {source}\n"
-            f"req: {requirements}\n"
-            f"benefit: {benefits}\n"
-            f"company name : {company}"
+        print(f"portal: {source}\n"
+              f"keywoard: {keywoard}"
         )
         
         majors_ = data['majors'] 
@@ -131,6 +169,9 @@ class Worker:
             
         job_name = record['job_name']
         url = record['url']
+
+        if location is not None and source == "linkedin":
+            location = self.etl.handle_location(location)
         
         self.silvers.insert(
             company=company,
@@ -145,7 +186,8 @@ class Worker:
             location=location,
             listing_date=formated_listing_date,
             benefits=benefits,
-            highlights=highlights
+            highlights=highlights,
+            keyword=keyword
         )
         
         

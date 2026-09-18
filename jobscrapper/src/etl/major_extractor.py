@@ -11,6 +11,8 @@ class MajorExtractor:
         self.matcher.add("majors", pattern)
         
     def extract(self, raw_data: str):
+        if raw_data is None:
+            return None
         raw = raw_data.lower()
         raw_doc = self.indonesia_nlp(raw)
         

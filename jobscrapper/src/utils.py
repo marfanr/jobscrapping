@@ -8,3 +8,12 @@ async def get_text(l: Locator) -> str | None:
         return await l.first.inner_text()
     
     return None
+
+def build_query_placeholder(data):
+    values = ", ".join(["(%s)"] * len(data))
+    query = (
+        f"VALUES {values}"
+        if data
+        else "SELECT NULL::TEXT WHERE FALSE"
+    )
+    return query
