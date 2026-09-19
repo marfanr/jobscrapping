@@ -430,6 +430,10 @@ services:
 
     environment:
       SPARK_NO_DAEMONIZE: "true"
+      SPARK_MASTER_HOST: "spark"
+      SPARK_MASTER_PORT: "7077"
+      SPARK_MASTER_WEBUI_PORT: "8080"
+
 
       # Official Spark image does not have a writable
       # normal home directory.
@@ -438,6 +442,7 @@ services:
     volumes:
       - ./infra/spark/conf:/opt/spark/conf:ro
       - ./infra/spark/jobs:/opt/spark/jobs:ro
+      - spark_events:/opt/spark/events
 
     command:
       - /opt/spark/sbin/start-master.sh
@@ -483,14 +488,20 @@ services:
     environment:
       SPARK_NO_DAEMONIZE: "true"
 
+      SPARK_WORKER_HOST: "spark-worker"
+      SPARK_WORKER_PORT: "7078"
+      SPARK_WORKER_WEBUI_PORT: "8081"
+
       SPARK_WORKER_CORES: "2"
       SPARK_WORKER_MEMORY: "2g"
+      SPARK_WORKER_DIR: /opt/spark/work
 
       HOME: /tmp
 
     volumes:
       - ./infra/spark/conf:/opt/spark/conf:ro
       - ./infra/spark/jobs:/opt/spark/jobs:ro
+      - spark_events:/opt/spark/events
 
     command:
       - /opt/spark/sbin/start-worker.sh
@@ -512,10 +523,33 @@ services:
       - core
       - spark
 
+  spark-events-init:
+    image: alpine:3.21
+    container_name: spark-events-init
+    restart: "no"
 
-  # ============================================================
-  # SPARK TEST / SUBMITTER
-  # ============================================================
+    volumes:
+      - spark_events:/opt/spark/events
+
+    command:
+      - /bin/sh
+      - -c
+      - |
+        set -e
+
+        echo "Preparing Spark event log directory..."
+
+        mkdir -p /opt/spark/events
+        chmod 777 /opt/spark/events
+
+        echo "Permissions:"
+        ls -ld /opt/spark/events
+
+        echo "Spark event directory ready."
+
+    profiles:
+      - core
+      - spark
 
   spark-init:
     image: apache/spark:4.1.3-scala2.13-java17-python3-r-ubuntu
@@ -533,12 +567,19 @@ services:
       polaris-init:
         condition: service_completed_successfully
 
+      broker_init:
+        condition: service_completed_successfully
+
+      spark-events-init:
+        condition: service_completed_successfully
+
     environment:
       HOME: /tmp
 
     volumes:
       - ./infra/spark/conf:/opt/spark/conf:ro
       - ./infra/spark/jobs:/opt/spark/jobs:ro
+      - spark_events:/opt/spark/events
 
     command:
       - /opt/spark/bin/spark-submit
@@ -548,6 +589,49 @@ services:
       - org.apache.iceberg:iceberg-spark-runtime-4.1_2.13:1.11.0,org.apache.iceberg:iceberg-aws-bundle:1.11.0,org.apache.spark:spark-sql-kafka-0-10_2.13:4.1.3
       - /opt/spark/jobs/listen.py
       # - /opt/spark/jobs/test.py
+
+    profiles:
+      - core
+      - spark
+
+  spark-history:
+    image: apache/spark:4.1.3-scala2.13-java17-python3-r-ubuntu
+    container_name: spark-history
+    hostname: spark-history
+    restart: unless-stopped
+
+    depends_on:
+      s3:
+        condition: service_started
+
+      seawedfs-init:
+        condition: service_completed_successfully
+
+    ports:
+      - "18081:18081"
+
+    environment:
+      SPARK_NO_DAEMONIZE: "true"
+      HOME: /tmp
+
+    volumes:
+      - ./infra/spark/conf:/opt/spark/conf:ro
+      - spark_events:/opt/spark/events
+
+    command:
+      - /opt/spark/sbin/start-history-server.sh
+
+    healthcheck:
+      test:
+        - CMD
+        - curl
+        - --fail
+        - http://localhost:18081
+
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
 
     profiles:
       - core
@@ -615,6 +699,44 @@ services:
 
     profiles:
       - core
+
+  broker_init:
+    image: apache/kafka:latest
+    depends_on:
+      - broker
+    profiles:
+      - core
+    entrypoint: 
+      - /bin/bash
+    command:
+      - -c
+      - |
+        set -e
+
+        echo "Waiting for Kafka..."
+
+        until /opt/kafka/bin/kafka-topics.sh \
+          --bootstrap-server broker:19092 \
+          --list >/dev/null 2>&1; do
+          sleep 2
+        done
+
+        echo "Kafka is ready."
+
+        /opt/kafka/bin/kafka-topics.sh \
+          --bootstrap-server broker:19092 \
+          --create \
+          --if-not-exists \
+          --topic rawjobs \
+          --partitions 3 \
+          --replication-factor 1
+
+        echo "Topic rawjobs created."
+
+        /opt/kafka/bin/kafka-topics.sh \
+          --bootstrap-server broker:19092 \
+          --describe \
+          --topic rawjobs
 
 
   # ============================================================
@@ -690,8 +812,8 @@ services:
       - ./airflow/plugins:/opt/airflow/plugins
       - airflow_logs:/opt/airflow/logs
       - ./infra/spark/jobs:/jobs/spark:ro
-
-      # DockerOperator
+      - ./infra/spark/conf:/opt/spark/conf:ro
+      - ./infra/dbt:/dbt:ro
       - /var/run/docker.sock:/var/run/docker.sock
 
     command:
@@ -706,10 +828,9 @@ services:
       - orchestrator
 
 
-    # ============================================================
+  # ============================================================
   # AIRFLOW INIT
   # ============================================================
-
   airflow-init:
     image: jobscrapper-airflow:0.1
     container_name: airflow-init
@@ -798,3 +919,4 @@ volumes:
   airflow_postgres_data:
   airflow_logs:
   seawedfs:
+  spark_events:
