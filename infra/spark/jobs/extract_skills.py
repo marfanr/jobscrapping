@@ -124,6 +124,11 @@ try:
     
     skills_incoming.createOrReplaceTempView("skills_incoming")
     
+    spark.sql(f"""
+        ALTER TABLE warehouse.silvers.job_skills_list
+        SET TBLPROPERTIES ('bronze.last_processed_snapshots_id'='{latest_bronze_snapshot}')
+    """)
+    
     spark.sql("""
         MERGE INTO warehouse.silvers.job_skills_list s
         USING skills_incoming m
@@ -139,6 +144,8 @@ try:
             INSERT (kafka_key, skills, updated_at)
             VALUES (m.kafka_key, m.skills, m.updated_at)
     """)
+    
+    print(f"processed {sql.count()} data")
     
     
 except Exception as e:
