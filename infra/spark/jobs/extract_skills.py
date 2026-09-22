@@ -76,7 +76,7 @@ try:
         warehouse.bronze.jobs.snapshots
         ORDER BY committed_at DESC
         LIMIT 1
-    """)
+    """).collect()
     
     if not snapshots_rows:
             print("Bronze table has no snapshots yet. Exiting.")
