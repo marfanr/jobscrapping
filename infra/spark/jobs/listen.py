@@ -11,17 +11,22 @@ from pyspark.sql.functions import (
     from_json,
     col,
     trim,
-    lower
+    lower,
+    current_timestamp
 )
 
 spark = (
     SparkSession.builder
     .appName("KafkaStream")
+    .config("spark.sql.adaptive.enabled", "false")
+    .config("spark.cores.max", "1")
     .getOrCreate()
 )
 
+spark.sql("CREATE NAMESPACE IF NOT EXISTS warehouse.bronze");
+
 spark.sql("""
-CREATE TABLE IF NOT EXISTS polaris.bronze.jobs (
+CREATE TABLE IF NOT EXISTS warehouse.bronze.jobs (
     company STRING,
     job_name STRING,
     url STRING,
@@ -36,11 +41,18 @@ CREATE TABLE IF NOT EXISTS polaris.bronze.jobs (
     publisher_name STRING,
     applicant INTEGER,
     quota INTEGER,
+    topic STRING,
+    kafka_key STRING,
+    kafka_partition INTEGER,
+    kafka_offset BIGINT,
+    kafka_timestamp TIMESTAMP,
     publisher_last_online TIMESTAMP,
     listing_date TIMESTAMP,
-    scraped_at TIMESTAMP
+    scraped_at TIMESTAMP,
+    ingested_at TIMESTAMP
 )
 USING iceberg
+PARTITIONED BY (truncate(1, company))
 """)
 
 schema = StructType([
@@ -57,6 +69,7 @@ schema = StructType([
     StructField('skills', ArrayType(StringType())),
     StructField('benefits', ArrayType(StringType())),
     StructField('publisher_name', StringType()),
+    StructField('salary', StringType()),
     StructField('publisher_last_online', TimestampType()),
     StructField('listing_date', TimestampType()),
     StructField('scraped_at', TimestampType()),
@@ -71,11 +84,26 @@ df = spark \
     
 jobs = (
         df
-        .selectExpr("CAST(value AS STRING) AS json")
         .select(
+            col("topic"),
+            col("key").cast("string").alias("kafka_key"),
+            col("partition").alias("kafka_partition"),
+            col("offset").alias("kafka_offset"),
+            col("timestamp").alias("kafka_timestamp"),
+            col("value").cast("string").alias("json")
+        )
+        .select(
+            "*",
             from_json(col="json", schema=schema).alias("data")
         )
-        .select("data.*")
+        .select(
+            "topic",
+            "kafka_key",
+            "kafka_partition",
+            "kafka_offset",
+            "kafka_timestamp",
+            "data.*"
+        )
     )
 
 cleaned_jobs = (
@@ -83,6 +111,7 @@ cleaned_jobs = (
     .withColumn("company", trim(lower(col("company"))))
     .withColumn("keyword", trim(lower(col("keyword"))))
     .withColumn("job_name", trim(lower(col("job_name"))))
+    .withColumn("ingested_at", current_timestamp())
 )
 
 final_job = (
@@ -101,9 +130,15 @@ final_job = (
         "publisher_name",
         "applicant",
         "quota",
+        "topic",
+        "kafka_key",
+        "kafka_partition",
+        "kafka_offset",
+        "kafka_timestamp",
         "publisher_last_online",
         "listing_date",
-        "scraped_at"
+        "scraped_at",
+        "ingested_at"
     )
 )
         
@@ -113,9 +148,8 @@ query = (
     .format("iceberg")
     .outputMode("append")
     .option("truncate", "false")
-    .toTable("polaris.bronze.jobs")
     .option("checkpointLocation", "/tmp/checkpoint/rawjobs")
-    .start()
+    .toTable("warehouse.bronze.jobs")
 )
 
 query.awaitTermination()

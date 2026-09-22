@@ -2,9 +2,7 @@ version: "3.9"
 
 services:
 
-  # ============================================================
   # SEAWEEDFS
-  # ============================================================
 
   master:
     image: chrislusf/seaweedfs
@@ -154,9 +152,7 @@ services:
       - s3
 
 
-  # ============================================================
   # SEAWEEDFS INITIALIZATION
-  # ============================================================
   seawedfs-init:
     image: amazon/aws-cli
     container_name: seawedfs-init
@@ -217,9 +213,7 @@ services:
       - core
       - s3
 
-  # ============================================================
   # PROMETHEUS
-  # ============================================================
 
   prometheus:
     image: prom/prometheus:v2.21.0
@@ -244,9 +238,59 @@ services:
       - s3
 
 
-  # ============================================================
   # APACHE POLARIS
-  # ============================================================
+
+  polaris-db:
+    image: postgres:16
+    container_name: polaris-db
+    hostname: polaris-db
+    restart: unless-stopped
+
+    environment:
+      POSTGRES_USER: polaris
+      POSTGRES_PASSWORD: polaris_password
+      POSTGRES_DB: polaris
+
+    volumes:
+      - polaris_db_data:/var/lib/postgresql/data
+
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U polaris -d polaris
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+    profiles:
+      - core
+      - spark
+
+  polaris-bootstrap:
+    image: apache/polaris-admin-tool:latest
+    container_name: polaris-bootstrap
+    restart: "no"
+
+    depends_on:
+      polaris-db:
+        condition: service_healthy
+
+    environment:
+      POLARIS_PERSISTENCE_TYPE: relational-jdbc
+      QUARKUS_DATASOURCE_USERNAME: polaris
+      QUARKUS_DATASOURCE_PASSWORD: polaris_password
+      QUARKUS_DATASOURCE_JDBC_URL: jdbc:postgresql://polaris-db:5432/polaris
+
+    command:
+      - bootstrap
+      - -r
+      - POLARIS
+      - -c
+      - POLARIS,root,s3cret
+
+    profiles:
+      - core
+      - spark
 
   polaris:
     image: apache/polaris:latest
@@ -259,6 +303,12 @@ services:
       - "8182:8182"
 
     depends_on:
+      polaris-db:
+        condition: service_healthy
+
+      polaris-bootstrap:
+        condition: service_completed_successfully
+
       seawedfs-init:
         condition: service_completed_successfully
 
@@ -268,12 +318,19 @@ services:
       # Polaris bootstrap
       # realm, client-id, client-secret
       # ----------------------------------------------------------
-      POLARIS_BOOTSTRAP_CREDENTIALS: "POLARIS,root,s3cret"
 
       polaris.realm-context.realms: "POLARIS"
 
       # Disable telemetry
       quarkus.otel.sdk.disabled: "true"
+
+      # postgres
+      POLARIS_PERSISTENCE_TYPE: relational-jdbc
+
+      QUARKUS_DATASOURCE_DB_KIND: postgresql
+      QUARKUS_DATASOURCE_JDBC_URL: jdbc:postgresql://polaris-db:5432/polaris
+      QUARKUS_DATASOURCE_USERNAME: polaris
+      QUARKUS_DATASOURCE_PASSWORD: polaris_password
 
       # ----------------------------------------------------------
       # S3 / SeaweedFS
@@ -297,20 +354,22 @@ services:
 
       interval: 5s
       timeout: 5s
-      retries: 20
-      start_period: 10s
+      retries: 50
+      start_period: 30s
 
     profiles:
       - core
       - spark
 
 
-  # ============================================================
   # POLARIS INITIALIZATION
-  # ============================================================
   polaris-init:
     image: alpine:3.21
     container_name: polaris-init
+    environment:
+      - AZURE_STORAGE_SAS_TOKEN=${AZURE_STORAGE_SAS_TOKEN}
+      - AZURE_TENANT_ID=${AZURE_TENANT_ID}
+
     restart: "no"
 
     depends_on:
@@ -386,10 +445,6 @@ services:
             }
           }')
 
-        echo "HTTP $${HTTP_CODE}"
-        cat /tmp/catalog-response.json
-        echo
-
         case "$${HTTP_CODE}" in
           200|201)
             echo "Catalog created."
@@ -399,9 +454,9 @@ services:
             ;;
           *)
             echo "ERROR: Failed to create catalog."
-            exit 1
             ;;
         esac
+
 
         echo
         echo "=== Polaris catalogs ==="
@@ -414,12 +469,14 @@ services:
         echo
         echo "Polaris initialization complete."
 
-  # ============================================================
   # SPARK MASTER
-  # ============================================================
 
   spark:
-    image: apache/spark:4.1.3-scala2.13-java17-python3-r-ubuntu
+    build:
+      context: .
+      dockerfile: ./infra/spark/Dockerfile
+    image: jobscrapper-spark:0.1
+
     container_name: spark
     hostname: spark
     restart: unless-stopped
@@ -433,10 +490,6 @@ services:
       SPARK_MASTER_HOST: "spark"
       SPARK_MASTER_PORT: "7077"
       SPARK_MASTER_WEBUI_PORT: "8080"
-
-
-      # Official Spark image does not have a writable
-      # normal home directory.
       HOME: /tmp
 
     volumes:
@@ -468,12 +521,14 @@ services:
       - spark
 
 
-  # ============================================================
   # SPARK WORKER
-  # ============================================================
 
   spark-worker:
-    image: apache/spark:4.1.3-scala2.13-java17-python3-r-ubuntu
+    build:
+      context: .
+      dockerfile: ./infra/spark/Dockerfile
+    image: jobscrapper-spark:0.1
+
     container_name: spark-worker
     hostname: spark-worker
     restart: unless-stopped
@@ -487,21 +542,19 @@ services:
 
     environment:
       SPARK_NO_DAEMONIZE: "true"
-
       SPARK_WORKER_HOST: "spark-worker"
       SPARK_WORKER_PORT: "7078"
       SPARK_WORKER_WEBUI_PORT: "8081"
-
-      SPARK_WORKER_CORES: "2"
+      SPARK_WORKER_CORES: "6"
       SPARK_WORKER_MEMORY: "2g"
       SPARK_WORKER_DIR: /opt/spark/work
-
       HOME: /tmp
 
     volumes:
       - ./infra/spark/conf:/opt/spark/conf:ro
       - ./infra/spark/jobs:/opt/spark/jobs:ro
       - spark_events:/opt/spark/events
+      - ./infra/internal_data:/opt/data
 
     command:
       - /opt/spark/sbin/start-worker.sh
@@ -554,24 +607,21 @@ services:
   spark-init:
     image: apache/spark:4.1.3-scala2.13-java17-python3-r-ubuntu
     container_name: spark-init
-    restart: "no"
+    restart: unless-stopped
 
     depends_on:
-
       spark:
         condition: service_healthy
-
       spark-worker:
         condition: service_healthy
-
       polaris-init:
         condition: service_completed_successfully
-
       broker_init:
         condition: service_completed_successfully
-
       spark-events-init:
         condition: service_completed_successfully
+      polaris:                        # ADD THIS
+        condition: service_healthy
 
     environment:
       HOME: /tmp
@@ -588,7 +638,6 @@ services:
       - --packages
       - org.apache.iceberg:iceberg-spark-runtime-4.1_2.13:1.11.0,org.apache.iceberg:iceberg-aws-bundle:1.11.0,org.apache.spark:spark-sql-kafka-0-10_2.13:4.1.3
       - /opt/spark/jobs/listen.py
-      # - /opt/spark/jobs/test.py
 
     profiles:
       - core
@@ -603,7 +652,6 @@ services:
     depends_on:
       s3:
         condition: service_started
-
       seawedfs-init:
         condition: service_completed_successfully
 
@@ -638,9 +686,7 @@ services:
       - spark
 
 
-  # ============================================================
   # KAFKA
-  # ============================================================
 
   broker:
     image: apache/kafka:latest
@@ -656,42 +702,29 @@ services:
 
     environment:
       KAFKA_NODE_ID: 1
-
       KAFKA_PROCESS_ROLES: broker,controller
-
       KAFKA_LISTENERS: >
         INTERNAL://:19092,
         EXTERNAL://:9092,
         VPN://:29092,
         CONTROLLER://:9093
-
       KAFKA_ADVERTISED_LISTENERS: >
         INTERNAL://broker:19092,
         EXTERNAL://localhost:9092,
         VPN://10.200.200.1:29092
-
       KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
-
       KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
-
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: >
         INTERNAL:PLAINTEXT,
         EXTERNAL:PLAINTEXT,
         VPN:PLAINTEXT,
         CONTROLLER:PLAINTEXT
-
       KAFKA_CONTROLLER_QUORUM_VOTERS: 1@broker:9093
-
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
-
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
-
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
-
       KAFKA_LOG_RETENTION_HOURS: 2
-
       KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
-
       KAFKA_NUM_PARTITIONS: 6
 
     volumes:
@@ -739,13 +772,12 @@ services:
           --topic rawjobs
 
 
-  # ============================================================
   # AIRFLOW POSTGRES
-  # ============================================================
 
   airflow-postgres:
     image: postgres:16
     container_name: airflow-postgres
+    hostname: airflow-postgres
     restart: unless-stopped
 
     environment:
@@ -756,99 +788,102 @@ services:
     volumes:
       - airflow_postgres_data:/var/lib/postgresql/data
 
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U airflow -d airflow
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
     profiles:
       - core
       - orchestrator
 
-  airflow:
+  # AIRFLOW INIT
+  airflow-logs-init:
+    image: alpine:3.21
+    container_name: airflow-logs-init
+    restart: "no"
+
+    volumes:
+      - airflow_logs:/opt/airflow/logs
+
+    command:
+      - /bin/sh
+      - -c
+      - |
+        set -e
+        echo "Preparing Airflow logs directory..."
+        mkdir -p /opt/airflow/logs
+        mkdir -p /opt/airflow/logs/dag_processor_manager
+        chmod -R 777 /opt/airflow/logs
+        echo "Permissions set:"
+        ls -ld /opt/airflow/logs
+        echo "Airflow logs directory ready."
+
+    profiles:
+      - core
+      - orchestrator
+      
+  airflow-init:
     build:
       context: .
       dockerfile: ./infra/airflow/Dockerfile
-
     image: jobscrapper-airflow:0.1
 
-    container_name: airflow
-    hostname: airflow
-    restart: unless-stopped
-
-    depends_on:
-      airflow-postgres:
-        condition: service_started
-
-      broker:
-        condition: service_started
-
-      spark:
-        condition: service_healthy
-
-      spark-worker:
-        condition: service_healthy
-
-    ports:
-      - "3000:8080"
-
-    environment:
-
-      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: >-
-        postgresql+psycopg2://airflow:airflow_password@airflow-postgres:5432/airflow
-
-      AIRFLOW__CORE__EXECUTOR: LocalExecutor
-      AIRFLOW__CORE__FERNET_KEY: 8tJ0REESeLns1m5Z2lPab5MtYMyXpqBzEd3j6LPg_aI=
-
-      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
-
-      AIRFLOW__API__AUTH_BACKENDS: airflow.api.auth.backend.basic_auth
-
-      KAFKA_BOOTSTRAP_SERVERS: broker:19092
-
-      AIRFLOW_CONN_SPARK_DEFAULT: >-
-        spark://spark:7077
-
-      AIRFLOW_CONN_KAFKA_DEFAULT: >-
-        kafka://broker:19092
-
-    volumes:
-      - ./infra/airflow/dags:/opt/airflow/dags:ro
-      - ./airflow/plugins:/opt/airflow/plugins
-      - airflow_logs:/opt/airflow/logs
-      - ./infra/spark/jobs:/jobs/spark:ro
-      - ./infra/spark/conf:/opt/spark/conf:ro
-      - ./infra/dbt:/dbt:ro
-      - /var/run/docker.sock:/var/run/docker.sock
-
-    command:
-      - airflow
-      - standalone
-
-    group_add:
-      - "114"
-
-    profiles:
-      - core
-      - orchestrator
-
-
-  # ============================================================
-  # AIRFLOW INIT
-  # ============================================================
-  airflow-init:
-    image: jobscrapper-airflow:0.1
     container_name: airflow-init
+    hostname: airflow-init
     restart: "no"
 
     depends_on:
       airflow-postgres:
-        condition: service_started
+        condition: service_healthy
+
+      airflow-logs-init:
+        condition: service_completed_successfully
+
       broker:
         condition: service_started
+
       spark:
         condition: service_healthy
 
-    environment:
+    environment: &airflow-environment
       AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: >-
         postgresql+psycopg2://airflow:airflow_password@airflow-postgres:5432/airflow
-      AIRFLOW__CORE__FERNET_KEY: 8tJ0REESeLns1m5Z2lPab5MtYMyXpqBzEd3j6LPg_aI=
+
       AIRFLOW__CORE__EXECUTOR: LocalExecutor
+
+      AIRFLOW__CORE__AUTH_MANAGER: airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager
+
+      AIRFLOW__CORE__FERNET_KEY: 8tJ0REESeLns1m5Z2lPab5MtYMyXpqBzEd3j6LPg_aI=
+
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+
+      AIRFLOW__CORE__EXECUTION_API_SERVER_URL: "http://airflow-apiserver:8080/execution/"
+
+      AIRFLOW__API_AUTH__JWT_SECRET: "airflow_jwt_secret_change_this"
+
+      AIRFLOW__API_AUTH__JWT_ISSUER: "airflow"
+
+
+      AIRFLOW__API__SECRET_KEY: "airflow_api_secret_change_this"
+
+      AIRFLOW__LOGGING__BASE_LOG_FOLDER: /opt/airflow/logs
+      AIRFLOW__LOGGING__LOGGING_LEVEL: INFO
+
+      AIRFLOW__API__AUTH_BACKENDS: airflow.providers.fab.auth_manager.api.auth.backend.basic_auth
+
+      AIRFLOW__DAG_PROCESSOR__MIN_FILE_PROCESS_INTERVAL: "5"
+
+      AIRFLOW_CONN_KAFKA_DEFAULT: kafka://broker:19092
+
+      AIRFLOW_CONN_SPARK_DEFAULT: spark://spark:7077
+
+      AIRFLOW_CONN_DOCKER_DEFAULT: >-
+        docker://?extra__docker__docker_url=unix%3A%2F%2Fvar%2Frun%2Fdocker.sock
+
 
     command:
       - bash
@@ -860,36 +895,8 @@ services:
         echo "Airflow initialization"
         echo "=========================================="
 
-        echo "Waiting for Airflow database..."
+        echo "Migrating Airflow database..."
         airflow db migrate
-
-        echo "Creating Spark connection..."
-
-        airflow connections delete spark_default || true
-
-        airflow connections add spark_default \
-          --conn-type spark \
-          --conn-host spark \
-          --conn-port 7077
-
-        echo "Creating Kafka connection..."
-
-        airflow connections delete kafka_default || true
-
-        airflow connections add kafka_default \
-          --conn-type kafka \
-          --conn-host broker \
-          --conn-port 19092
-
-        echo "Creating Docker connection..."
-
-        airflow connections delete docker_default || true
-
-        airflow connections add docker_default \
-          --conn-type docker \
-          --conn-extra '{
-            "docker_url": "unix://var/run/docker.sock"
-          }'
 
         echo
         echo "=========================================="
@@ -901,18 +908,189 @@ services:
         airflow connections get docker_default
 
         echo
-        echo "Airflow initialization complete."
+        echo "=========================================="
+        echo "Creating Airflow admin user"
+        echo "=========================================="
 
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
+        if airflow users list | grep -q '^admin'; then
+            echo "User 'admin' already exists."
+        else
+            airflow users create \
+              --username admin \
+              --firstname Admin \
+              --lastname Admin \
+              --role Admin \
+              --email admin@example.com \
+              --password admin
+
+            echo "User 'admin' created."
+        fi
+
+        echo
+        echo "Airflow initialization complete."
 
     profiles:
       - core
       - orchestrator
 
-# ================================================================
-# VOLUMES
-# ================================================================
+
+  # AIRFLOW API SERVER
+  airflow-apiserver:
+    build:
+      context: .
+      dockerfile: ./infra/airflow/Dockerfile
+
+    image: jobscrapper-airflow:0.1
+
+    container_name: airflow-apiserver
+    hostname: airflow-apiserver
+    restart: unless-stopped
+
+    depends_on:
+      airflow-postgres:
+        condition: service_healthy
+
+      airflow-init:
+        condition: service_completed_successfully
+
+    ports:
+      - "3000:8080"
+
+    environment:
+      <<: *airflow-environment
+
+    volumes: &airflow-volumes
+      - ./infra/airflow/dags:/opt/airflow/dags:ro
+      - ./airflow/plugins:/opt/airflow/plugins
+      - airflow_logs:/opt/airflow/logs
+      - ./infra/spark/jobs:/jobs/spark:ro
+      - ./infra/spark/conf:/opt/spark/conf:ro
+      - spark_events:/opt/spark/events
+      - ./infra/dbt:/dbt:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./infra/internal_data:/opt/data
+
+    command:
+      - airflow
+      - api-server
+
+
+    profiles:
+      - core
+      - orchestrator
+
+
+  # AIRFLOW SCHEDULER
+
+  airflow-scheduler:
+    image: jobscrapper-airflow:0.1
+
+    container_name: airflow-scheduler
+    hostname: airflow-scheduler
+    restart: unless-stopped
+
+    depends_on:
+      airflow-postgres:
+        condition: service_healthy
+
+      airflow-init:
+        condition: service_completed_successfully
+
+      broker:
+        condition: service_started
+
+      spark:
+        condition: service_healthy
+
+      spark-worker:
+        condition: service_healthy
+
+    environment:
+      <<: *airflow-environment
+
+    volumes: *airflow-volumes
+
+    command:
+      - airflow
+      - scheduler
+
+
+    profiles:
+      - core
+      - orchestrator
+
+
+  # AIRFLOW DAG PROCESSOR
+
+  airflow-dag-processor:
+    image: jobscrapper-airflow:0.1
+
+    container_name: airflow-dag-processor
+    hostname: airflow-dag-processor
+    restart: unless-stopped
+
+    depends_on:
+      airflow-postgres:
+        condition: service_healthy
+
+      airflow-init:
+        condition: service_completed_successfully
+
+      broker_init:
+        condition: service_completed_successfully
+
+    environment:
+      <<: *airflow-environment
+
+    volumes: *airflow-volumes
+
+    command:
+      - airflow
+      - dag-processor
+
+    profiles:
+      - core
+      - orchestrator
+
+
+  # AIRFLOW TRIGGERER
+
+  airflow-triggerer:
+    image: jobscrapper-airflow:0.1
+
+    container_name: airflow-triggerer
+    hostname: airflow-triggerer
+    restart: unless-stopped
+
+    depends_on:
+      airflow-postgres:
+        condition: service_healthy
+
+      airflow-init:
+        condition: service_completed_successfully
+
+      broker_init:
+        condition: service_completed_successfully
+
+    environment:
+      <<: *airflow-environment
+
+    volumes: *airflow-volumes
+
+    command:
+      - airflow
+      - triggerer
+
+
+    profiles:
+      - core
+      - orchestrator
+
+# Trino
+  trino:
+    image: trinodb/trino
+    ports:
+      - 9090:8080
 
 volumes:
   kafka_data:
@@ -920,3 +1098,4 @@ volumes:
   airflow_logs:
   seawedfs:
   spark_events:
+  polaris_db_data:
