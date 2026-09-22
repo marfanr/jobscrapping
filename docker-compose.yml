@@ -1091,6 +1091,8 @@ services:
     image: trinodb/trino
     ports:
       - 9090:8080
+    volumes:
+      - ./infra/trino/catalog:/etc/trino/catalog:ro
 
 volumes:
   kafka_data:
