@@ -134,7 +134,7 @@ try:
                     coalesce(s.skills, array()),
                     coalesce(m.skills, array())
                 ),
-                s.update_at = m.updated_at
+                s.updated_at = m.updated_at
         WHEN NOT MATCHED THEN
             INSERT (kafka_key, skills, updated_at)
             VALUES (m.kafka_key, m.skills, m.updated_at)
