@@ -153,3 +153,4 @@ query = (
 )
 
 query.awaitTermination()
+# query.stop()

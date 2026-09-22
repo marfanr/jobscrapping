@@ -71,16 +71,47 @@ try:
             
         return pd.Series(results)
     
-    current_snapsot = spark.sql("""
-    """)
+    props_df = spark.sql("SHOW TBLPROPERTIES warehouse.silvers.job_majors_list")
+    props = {row["key"]: row["value"] for row in props_df.collect()}
+    last_processed_snapshot = props.get("bronze.last_processed_snapshot_id")
+    
+    snapshots_rows = spark.sql("""
+        SELECT snapshot_id FROM warehouse.bronze.jobs.snapshots
+        ORDER BY committed_at DESC LIMIT 1
+    """).collect()
+    
+    if not snapshots_rows:
+        print("Bronze table has no snapshots yet. Exiting.")
+        sys.exit(0)
+        
+    latest_bronze_snapshot = str(snapshots_rows[0]['snapshot_id'])
+    
+    
+    print(f"current processed snapshot: {last_processed_snapshot}")
+    print(f"current bronze snapshot: {latest_bronze_snapshot}")
+    
+    if last_processed_snapshot == latest_bronze_snapshot:
+        print(f"No new snapshots found in Bronze ({latest_bronze_snapshot}). Nothing to process. Exiting.")
+        sys.exit(0)
+    
+    if last_processed_snapshot:
+        raw_jobs = (
+            spark.read
+            .format("iceberg")
+            .option("start-snapshot-id", int(last_processed_snapshot))
+            .option("end-snapshot-id", int(latest_bronze_snapshot))
+            .load("warehouse.bronze.jobs")
+        )
+    else:
+        raw_jobs = spark.table("warehouse.bronze.jobs")
 
     sql = (
-        spark.sql("""
-            SELECT company, kafka_key, details FROM warehouse.bronze.jobs""")
-            .filter(col("kafka_key").isNotNull())
-            .dropDuplicates(["kafka_key", "company"])
-            .repartition(8)
-        )
+        raw_jobs
+        .select("kafka_key", "details", "company")
+        .filter(col("kafka_key").isNotNull())
+        .dropDuplicates(["kafka_key", "company"])
+        .repartition(2)
+    )
     
     majors_incoming = (
         sql
@@ -93,7 +124,12 @@ try:
     )
     
     majors_incoming.createOrReplaceTempView("incoming_majors")
-    majors_incoming.show()
+    
+    
+    spark.sql(f"""
+        ALTER TABLE warehouse.silvers.job_majors_list
+        SET TBLPROPERTIES ('bronze.last_processed_snapshot_id'='{latest_bronze_snapshot}')
+    """)
     
     
     spark.sql("""
@@ -111,6 +147,8 @@ try:
             INSERT (kafka_key, majors, updated_at)
             VALUES (i.kafka_key, i.majors, i.updated_at)
         """)
+
+    print(f"processed {sql.count()} data")
         
 except Exception as e:
     print(

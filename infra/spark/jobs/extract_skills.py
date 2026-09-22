@@ -1,7 +1,8 @@
 from pyspark.sql import SparkSession, Row
 from pyspark.sql.functions import (
     pandas_udf,
-    col,    
+    col,
+    current_timestamp
 )
 from pyspark.sql.types import (
     ArrayType,
@@ -18,6 +19,17 @@ try:
         .appName("extract_skills")
         .getOrCreate()
     )
+    
+    spark.sql("CREATE NAMESPACE IF NOT EXISTS warehouse.silvers")
+        
+    spark.sql("""
+    CREATE TABLE IF NOT EXISTS warehouse.silvers.job_skills_list (
+        kafka_key STRING,
+        skills ARRAY<STRING>,
+        updated_at TIMESTAMP
+    )
+    USING ICEBERG
+    """)
     
     skills_list = pd.read_csv("/opt/data/skills.csv")
     target_skills = (
@@ -55,30 +67,79 @@ try:
             
         return pd.Series(results)
 
-    sql = (
-        spark.sql("SELECT kafka_key, details FROM warehouse.bronze.jobs")
-            .withColumn("details", extract_skills("details"))
-            .select(
-                "details"
-            )
-        )
-    sql.show(truncate=False)
+    props_df = spark.sql("SHOW TBLPROPERTIES warehouse.silvers.job_skills_list")
+    props = {row["key"]: row["value"] for row in props_df.collect()}
+    last_processed_snapshot = props.get("bronze.last_processed_snapshots_id")
     
-    # log = Row(
-    #     batch_id=batch_id,
-    #     source=source,
-    #     started_at=started_at,
-    #     finished_at=finished_at,
-    #     status="SUCCESS",
-    #     row_count=row_count,
-    #     error_message=None
-    # )
-
-    # df = spark.createDataFrame([log])
-
-    # df.writeTo(
-    #     "warehouse.meta.processing_log"
-    # ).append()
+    snapshots_rows = spark.sql("""
+        SELECT snapshot_id FROM
+        warehouse.bronze.jobs.snapshots
+        ORDER BY committed_at DESC
+        LIMIT 1
+    """)
+    
+    if not snapshots_rows:
+            print("Bronze table has no snapshots yet. Exiting.")
+            sys.exit(0)
+            
+    latest_bronze_snapshot = str(snapshots_rows[0]['snapshot_id'])
+    
+    print(f"current processed snapshot: {last_processed_snapshot}")
+    print(f"current bronze snapshot: {latest_bronze_snapshot}")
+    
+    if last_processed_snapshot == latest_bronze_snapshot:
+        print(f"No new snapshots found in Bronze ({latest_bronze_snapshot}). Nothing to process. Exiting.")
+        sys.exit(0)
+    
+    if last_processed_snapshot:
+        raw = (
+            spark.read
+            .format("iceberg")
+            .option("start-snapshot-id", int(last_processed_snapshot))
+            .option("end-snapshot-id", int(latest_bronze_snapshot))
+            .load("warehouse.bronze.jobs")
+        )
+    else:
+        raw = (
+            spark.table("warehouse.bronze.jobs")
+        )
+    
+    sql = (
+            raw
+            .select("kafka_key", "details", "company")
+            .filter(col("kafka_key").isNotNull())
+            .drop_duplicates(["kafka_key", "company"])
+            .repartition(2)
+        )
+    
+    skills_incoming = (
+        sql
+        .withColumn("details", extract_skills("details"))
+        .select(
+            "kafka_key",
+            col("details").alias("skills")
+        )
+        .withColumn("updated_at", current_timestamp())
+    )
+    
+    skills_incoming.createOrReplaceTempView("skills_incoming")
+    
+    spark.sql("""
+        MERGE INTO warehouse.silvers.job_skills_list s
+        USING skills_incoming m
+        ON s.kafka_key = m.kafka_key
+        WHEN MATCHED THEN
+            UPDATE SET
+                s.skills = array_union(
+                    coalesce(s.skills, array()),
+                    coalesce(m.skills, array())
+                ),
+                s.update_at = m.updated_at
+        WHEN NOT MATCHED THEN
+            INSERT (kafka_key, skills, updated_at)
+            VALUES (m.kafka_key, m.skills, m.updated_at)
+    """)
+    
     
 except Exception as e:
     print(

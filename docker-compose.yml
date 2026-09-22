@@ -545,7 +545,7 @@ services:
       SPARK_WORKER_HOST: "spark-worker"
       SPARK_WORKER_PORT: "7078"
       SPARK_WORKER_WEBUI_PORT: "8081"
-      SPARK_WORKER_CORES: "6"
+      SPARK_WORKER_CORES: "4"
       SPARK_WORKER_MEMORY: "2g"
       SPARK_WORKER_DIR: /opt/spark/work
       HOME: /tmp
