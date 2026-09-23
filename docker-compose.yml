@@ -852,38 +852,25 @@ services:
     environment: &airflow-environment
       AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: >-
         postgresql+psycopg2://airflow:airflow_password@airflow-postgres:5432/airflow
-
       AIRFLOW__CORE__EXECUTOR: LocalExecutor
-
       AIRFLOW__CORE__AUTH_MANAGER: airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager
-
       AIRFLOW__CORE__FERNET_KEY: 8tJ0REESeLns1m5Z2lPab5MtYMyXpqBzEd3j6LPg_aI=
-
       AIRFLOW__CORE__LOAD_EXAMPLES: "false"
-
       AIRFLOW__CORE__EXECUTION_API_SERVER_URL: "http://airflow-apiserver:8080/execution/"
-
       AIRFLOW__API_AUTH__JWT_SECRET: "airflow_jwt_secret_change_this"
-
       AIRFLOW__API_AUTH__JWT_ISSUER: "airflow"
-
-
       AIRFLOW__API__SECRET_KEY: "airflow_api_secret_change_this"
-
       AIRFLOW__LOGGING__BASE_LOG_FOLDER: /opt/airflow/logs
       AIRFLOW__LOGGING__LOGGING_LEVEL: INFO
-
       AIRFLOW__API__AUTH_BACKENDS: airflow.providers.fab.auth_manager.api.auth.backend.basic_auth
-
       AIRFLOW__DAG_PROCESSOR__MIN_FILE_PROCESS_INTERVAL: "5"
-
       AIRFLOW_CONN_KAFKA_DEFAULT: kafka://broker:19092
-
       AIRFLOW_CONN_SPARK_DEFAULT: spark://spark:7077
-
       AIRFLOW_CONN_DOCKER_DEFAULT: >-
         docker://?extra__docker__docker_url=unix%3A%2F%2Fvar%2Frun%2Fdocker.sock
 
+      DBT_TARGET_PATH: /tmp/dbt_target
+      DBT_LOG_PATH: /tmp/dbt_logs
 
     command:
       - bash
@@ -966,9 +953,9 @@ services:
       - ./infra/spark/jobs:/jobs/spark:ro
       - ./infra/spark/conf:/opt/spark/conf:ro
       - spark_events:/opt/spark/events
-      - ./infra/dbt:/dbt:ro
       - /var/run/docker.sock:/var/run/docker.sock
       - ./infra/internal_data:/opt/data
+      - ./infra/dbt:/dbt:ro
 
     command:
       - airflow
@@ -1092,7 +1079,25 @@ services:
     ports:
       - 9090:8080
     volumes:
-      - ./infra/trino/catalog:/etc/trino/catalog:ro
+      - ./infra/trino/coordinator:/etc/trino:ro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/v1/info"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+  
+  trino-worker:
+    image: trinodb/trino
+    volumes:
+      - ./infra/trino/worker:/etc/trino:ro
+    depends_on:
+      trino:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/v1/info"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
 
 volumes:
   kafka_data:
