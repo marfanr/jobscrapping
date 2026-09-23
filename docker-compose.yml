@@ -707,11 +707,6 @@ services:
     hostname: spark-worker
     restart: unless-stopped
 
-    # SPARK_WORKER_CORES=1 / SPARK_WORKER_MEMORY=1g so the worker's own
-    # requested capacity roughly matches this host's 2-core budget once
-    # spark-master + everything else is also running. mem_limit is kept
-    # a bit above SPARK_WORKER_MEMORY for JVM/off-heap overhead, not to
-    # grant extra Spark capacity.
     mem_limit: 1200m
     cpus: 1
 
@@ -727,7 +722,7 @@ services:
       SPARK_WORKER_HOST: "spark-worker"
       SPARK_WORKER_PORT: "7078"
       SPARK_WORKER_WEBUI_PORT: "8081"
-      SPARK_WORKER_CORES: "1"
+      SPARK_WORKER_CORES: "2"
       SPARK_WORKER_MEMORY: "1g"
       SPARK_WORKER_DIR: /opt/spark/work
       HOME: /tmp
@@ -1030,12 +1025,11 @@ services:
 
       AIRFLOW__CORE__EXECUTOR: LocalExecutor
       AIRFLOW__CORE__PARALLELISM: "1"
-      AIRFLOW__CORE__MAX_ACTIVE_TASKS_PER_DAG: "1"
+      AIRFLOW__CORE__MAX_ACTIVE_TASKS_PER_DAG: "2"
       AIRFLOW__CORE__MAX_ACTIVE_RUNS_PER_DAG: "1"
       AIRFLOW__CORE__LOAD_EXAMPLES: "false"
       AIRFLOW__CORE__FERNET_KEY: 8tJ0REESeLns1m5Z2lPab5MtYMyXpqBzEd3j6LPg_aI=
 
-      # API server: one worker is enough for this host.
       AIRFLOW__API__WORKERS: "1"
       AIRFLOW__API__WORKER_TIMEOUT: "120"
       AIRFLOW__API__HOST: "0.0.0.0"
