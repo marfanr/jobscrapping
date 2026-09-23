@@ -10,7 +10,7 @@ services:
     restart: unless-stopped
 
     mem_limit: 256m
-    cpus: 0.3
+    cpus: 0.5
 
     ports:
       - "9333:9333"
@@ -23,14 +23,17 @@ services:
       - -ip.bind=0.0.0.0
       - -metricsPort=9324
 
+    profiles:
+      - core
+      - s3
   volume:
     image: chrislusf/seaweedfs
     container_name: seaweedfs-volume
     hostname: volume
     restart: unless-stopped
 
-    mem_limit: 384m
-    cpus: 0.4
+    mem_limit: 512m
+    cpus: 1
 
     ports:
       - "8080:8080"
@@ -52,14 +55,19 @@ services:
     depends_on:
       - master
 
+    profiles:
+      - core
+      - s3
+
+
   filer:
     image: chrislusf/seaweedfs
     container_name: seaweedfs-filer
     hostname: filer
     restart: unless-stopped
 
-    mem_limit: 200m
-    cpus: 0.2
+    mem_limit: 256m
+    cpus: 0.5
 
     ports:
       - "8888:8888"
@@ -77,14 +85,19 @@ services:
       - master
       - volume
 
+    profiles:
+      - core
+      - s3
+
+
   s3:
     image: chrislusf/seaweedfs
     container_name: s3
     hostname: s3
     restart: unless-stopped
 
-    mem_limit: 200m
-    cpus: 0.2
+    mem_limit: 256m
+    cpus: 0.5
 
     depends_on:
       - filer
@@ -100,13 +113,17 @@ services:
     volumes:
       - ./infra/seaweedfs/s3.json:/etc/seaweedfs/s3.json:ro
 
+    profiles:
+      - core
+      - s3
+
   webdav:
     image: chrislusf/seaweedfs
     container_name: seaweedfs-webdav
     restart: unless-stopped
 
     mem_limit: 128m
-    cpus: 0.2
+    cpus: 0.25
 
     ports:
       - "7333:7333"
@@ -120,13 +137,18 @@ services:
       - volume
       - filer
 
+    profiles:
+      - core
+      - s3
+
+
   admin:
     image: chrislusf/seaweedfs
     container_name: seaweedfs-admin
     restart: unless-stopped
 
     mem_limit: 128m
-    cpus: 0.2
+    cpus: 0.25
 
     ports:
       - "23646:23646"
@@ -140,13 +162,18 @@ services:
       - volume
       - filer
 
+    profiles:
+      - core
+      - s3
+
+
   # SEAWEEDFS INITIALIZATION
   seawedfs-init:
     image: amazon/aws-cli
     container_name: seawedfs-init
 
     mem_limit: 128m
-    cpus: 0.2
+    cpus: 0.25
 
     depends_on:
       - s3
@@ -200,14 +227,19 @@ services:
         aws s3api list-buckets \
           --endpoint-url http://s3:8333
 
+    profiles:
+      - core
+      - s3
+
   # PROMETHEUS
+
   prometheus:
     image: prom/prometheus:v2.21.0
     container_name: prometheus
     restart: unless-stopped
 
     mem_limit: 256m
-    cpus: 0.3
+    cpus: 0.5
 
     ports:
       - "9000:9090"
@@ -222,6 +254,11 @@ services:
     depends_on:
       - s3
 
+    profiles:
+      - core
+      - s3
+
+
   # APACHE POLARIS
   polaris-db:
     image: postgres:16
@@ -229,8 +266,8 @@ services:
     hostname: polaris-db
     restart: unless-stopped
 
-    mem_limit: 384m
-    cpus: 0.4
+    mem_limit: 512m
+    cpus: 1
 
     environment:
       POSTGRES_USER: polaris
@@ -246,15 +283,19 @@ services:
         - pg_isready -U polaris -d polaris
       interval: 5s
       timeout: 5s
-      retries: 20
+      retries: 10
+
+    profiles:
+      - core
+      - spark
 
   polaris-bootstrap:
     image: apache/polaris-admin-tool:latest
     container_name: polaris-bootstrap
     restart: "no"
 
-    mem_limit: 384m
-    cpus: 0.3
+    mem_limit: 512m
+    cpus: 0.5
 
     depends_on:
       polaris-db:
@@ -273,6 +314,9 @@ services:
       - -c
       - POLARIS,root,s3cret
 
+    profiles:
+      - core
+      - spark
 
   polaris:
     image: apache/polaris:latest
@@ -280,8 +324,8 @@ services:
     hostname: polaris
     restart: unless-stopped
 
-    mem_limit: 768m
-    cpus: 0.6
+    mem_limit: 1g
+    cpus: 1
 
     ports:
       - "8181:8181"
@@ -332,8 +376,13 @@ services:
 
       interval: 5s
       timeout: 5s
-      retries: 60
-      start_period: 45s
+      retries: 50
+      start_period: 30s
+
+    profiles:
+      - core
+      - spark
+
 
   # POLARIS INITIALIZATION
   polaris-init:
@@ -342,7 +391,7 @@ services:
     restart: "no"
 
     mem_limit: 128m
-    cpus: 0.2
+    cpus: 0.25
 
     depends_on:
       polaris:
@@ -648,6 +697,7 @@ services:
         echo "=========================================="
 
   # SPARK MASTER
+
   spark:
     build:
       context: .
@@ -657,9 +707,6 @@ services:
     container_name: spark
     hostname: spark
     restart: unless-stopped
-
-    mem_limit: 700m
-    cpus: 0.5
 
     ports:
       - "7077:7077"
@@ -689,14 +736,20 @@ services:
 
       interval: 10s
       timeout: 5s
-      retries: 20
-      start_period: 20s
+      retries: 10
+      start_period: 10s
 
     depends_on:
       polaris-init:
         condition: service_completed_successfully
 
+    profiles:
+      - core
+      - spark
+
+
   # SPARK WORKER
+
   spark-worker:
     build:
       context: .
@@ -707,14 +760,9 @@ services:
     hostname: spark-worker
     restart: unless-stopped
 
-    # SPARK_WORKER_CORES=1 / SPARK_WORKER_MEMORY=1g so the worker's own
-    # requested capacity roughly matches this host's 2-core budget once
-    # spark-master + everything else is also running. mem_limit is kept
-    # a bit above SPARK_WORKER_MEMORY for JVM/off-heap overhead, not to
-    # grant extra Spark capacity.
-    mem_limit: 1200m
-    cpus: 1
-
+    # Container ceiling kept above SPARK_WORKER_MEMORY (2g) so the JVM
+    # itself never gets OOM-killed by the container cgroup — the extra
+    # headroom is for off-heap/JVM overhead, not extra Spark capacity.
     depends_on:
       spark:
         condition: service_healthy
@@ -727,8 +775,8 @@ services:
       SPARK_WORKER_HOST: "spark-worker"
       SPARK_WORKER_PORT: "7078"
       SPARK_WORKER_WEBUI_PORT: "8081"
-      SPARK_WORKER_CORES: "1"
-      SPARK_WORKER_MEMORY: "1g"
+      SPARK_WORKER_CORES: "2"
+      SPARK_WORKER_MEMORY: "4g"
       SPARK_WORKER_DIR: /opt/spark/work
       HOME: /tmp
 
@@ -751,8 +799,12 @@ services:
 
       interval: 10s
       timeout: 5s
-      retries: 20
-      start_period: 20s
+      retries: 10
+      start_period: 10s
+
+    profiles:
+      - core
+      - spark
 
   spark-events-init:
     image: alpine:3.21
@@ -781,13 +833,17 @@ services:
 
         echo "Spark event directory ready."
 
+    profiles:
+      - core
+      - spark
+
   spark-init:
     image: apache/spark:4.1.3-scala2.13-java17-python3-r-ubuntu
     container_name: spark-init
     restart: unless-stopped
 
-    mem_limit: 700m
-    cpus: 0.4
+    mem_limit: 1g
+    cpus: 1
 
     depends_on:
       spark:
@@ -800,7 +856,7 @@ services:
         condition: service_completed_successfully
       spark-events-init:
         condition: service_completed_successfully
-      polaris:
+      polaris:                        # ADD THIS
         condition: service_healthy
 
     environment:
@@ -819,14 +875,18 @@ services:
       - org.apache.iceberg:iceberg-spark-runtime-4.1_2.13:1.11.0,org.apache.iceberg:iceberg-aws-bundle:1.11.0,org.apache.spark:spark-sql-kafka-0-10_2.13:4.1.3
       - /opt/spark/jobs/listen.py
 
+    profiles:
+      - core
+      - spark
+
   spark-history:
     image: apache/spark:4.1.3-scala2.13-java17-python3-r-ubuntu
     container_name: spark-history
     hostname: spark-history
     restart: unless-stopped
 
-    mem_limit: 400m
-    cpus: 0.3
+    mem_limit: 512m
+    cpus: 0.5
 
     depends_on:
       s3:
@@ -857,10 +917,16 @@ services:
 
       interval: 10s
       timeout: 5s
-      retries: 20
-      start_period: 20s
+      retries: 10
+      start_period: 10s
+
+    profiles:
+      - core
+      - spark
+
 
   # KAFKA
+
   broker:
     image: apache/kafka:latest
     container_name: broker
@@ -871,8 +937,8 @@ services:
       - "9092:9092"
       - "29092:29092"
 
-    mem_limit: 700m
-    cpus: 0.5
+    mem_limit: 1g
+    cpus: 1
 
     environment:
       KAFKA_NODE_ID: 1
@@ -899,21 +965,25 @@ services:
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
       KAFKA_LOG_RETENTION_HOURS: 2
       KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
-      KAFKA_NUM_PARTITIONS: 3
+      KAFKA_NUM_PARTITIONS: 6
 
     volumes:
       - kafka_data:/var/lib/kafka/data
+
+    profiles:
+      - core
 
   broker_init:
     image: apache/kafka:latest
 
     mem_limit: 128m
-    cpus: 0.2
+    cpus: 0.25
 
     depends_on:
       - broker
-    
-    entrypoint:
+    profiles:
+      - core
+    entrypoint: 
       - /bin/bash
     command:
       - -c
@@ -945,15 +1015,17 @@ services:
           --describe \
           --topic rawjobs
 
+
   # AIRFLOW POSTGRES
+
   airflow-postgres:
     image: postgres:16
     container_name: airflow-postgres
     hostname: airflow-postgres
     restart: unless-stopped
 
-    mem_limit: 256m
-    cpus: 0.2
+    mem_limit: 512m
+    cpus: 1
 
     environment:
       POSTGRES_USER: airflow
@@ -969,9 +1041,13 @@ services:
         - pg_isready -U airflow -d airflow
       interval: 5s
       timeout: 5s
-      retries: 20
+      retries: 10
 
-  # AIRFLOW LOG INIT
+    profiles:
+      - core
+      - orchestrator
+
+  # AIRFLOW INIT
   airflow-logs-init:
     image: alpine:3.21
     container_name: airflow-logs-init
@@ -988,76 +1064,59 @@ services:
       - -c
       - |
         set -e
+        echo "Preparing Airflow logs directory..."
+        mkdir -p /opt/airflow/logs
         mkdir -p /opt/airflow/logs/dag_processor_manager
         chmod -R 777 /opt/airflow/logs
+        echo "Permissions set:"
+        ls -ld /opt/airflow/logs
+        echo "Airflow logs directory ready."
 
-  # AIRFLOW STANDALONE
-  # One container runs API server, scheduler, dag processor and triggerer.
-  airflow:
+    profiles:
+      - core
+      - orchestrator
+      
+  airflow-init:
     build:
       context: .
       dockerfile: ./infra/airflow/Dockerfile
     image: jobscrapper-airflow:0.1
-    container_name: airflow
-    hostname: airflow
-    restart: unless-stopped
 
-    # Conservative budget for a 2-vCPU / 16-GB host.
-    # LocalExecutor is limited to one concurrent task below.
-    mem_limit: 1400m
-    cpus: 0.8
+    container_name: airflow-init
+    hostname: airflow-init
+    restart: "no"
+
+    mem_limit: 512m
+    cpus: 1
 
     depends_on:
       airflow-postgres:
         condition: service_healthy
+
       airflow-logs-init:
         condition: service_completed_successfully
+
       broker:
         condition: service_started
+
       spark:
         condition: service_healthy
-
-    ports:
-      - "3000:8080"
 
     environment: &airflow-environment
       AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: >-
         postgresql+psycopg2://airflow:airflow_password@airflow-postgres:5432/airflow
-
-      # Airflow 3 standalone uses the built-in SimpleAuthManager.
-      AIRFLOW__CORE__AUTH_MANAGER: airflow.api_fastapi.auth.managers.simple.simple_auth_manager.SimpleAuthManager
-      AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_USERS: "admin:admin"
-
       AIRFLOW__CORE__EXECUTOR: LocalExecutor
-      AIRFLOW__CORE__PARALLELISM: "1"
-      AIRFLOW__CORE__MAX_ACTIVE_TASKS_PER_DAG: "1"
-      AIRFLOW__CORE__MAX_ACTIVE_RUNS_PER_DAG: "1"
-      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__CORE__AUTH_MANAGER: airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager
       AIRFLOW__CORE__FERNET_KEY: 8tJ0REESeLns1m5Z2lPab5MtYMyXpqBzEd3j6LPg_aI=
-
-      # API server: one worker is enough for this host.
-      AIRFLOW__API__WORKERS: "1"
-      AIRFLOW__API__WORKER_TIMEOUT: "120"
-      AIRFLOW__API__HOST: "0.0.0.0"
-      AIRFLOW__API__PORT: "8080"
-
-      # Keep DAG parsing lightweight.
-      AIRFLOW__DAG_PROCESSOR__PARSING_PROCESSES: "1"
-      AIRFLOW__DAG_PROCESSOR__MIN_FILE_PROCESS_INTERVAL: "5"
-
-      # Small SQLAlchemy pool for the small VM.
-      AIRFLOW__DATABASE__SQL_ALCHEMY_POOL_SIZE: "3"
-      AIRFLOW__DATABASE__SQL_ALCHEMY_MAX_OVERFLOW: "2"
-      AIRFLOW__DATABASE__SQL_ALCHEMY_POOL_PRE_PING: "true"
-
-      AIRFLOW__LOGGING__BASE_LOG_FOLDER: /opt/airflow/logs
-      AIRFLOW__LOGGING__LOGGING_LEVEL: INFO
-
-      AIRFLOW__CORE__EXECUTION_API_SERVER_URL: "http://airflow:8080/execution/"
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__CORE__EXECUTION_API_SERVER_URL: "http://airflow-apiserver:8080/execution/"
       AIRFLOW__API_AUTH__JWT_SECRET: "airflow_jwt_secret_change_this"
       AIRFLOW__API_AUTH__JWT_ISSUER: "airflow"
       AIRFLOW__API__SECRET_KEY: "airflow_api_secret_change_this"
-
+      AIRFLOW__LOGGING__BASE_LOG_FOLDER: /opt/airflow/logs
+      AIRFLOW__LOGGING__LOGGING_LEVEL: INFO
+      AIRFLOW__API__AUTH_BACKENDS: airflow.providers.fab.auth_manager.api.auth.backend.basic_auth
+      AIRFLOW__DAG_PROCESSOR__MIN_FILE_PROCESS_INTERVAL: "5"
       AIRFLOW_CONN_KAFKA_DEFAULT: kafka://broker:19092
       AIRFLOW_CONN_SPARK_DEFAULT: spark://spark:7077
       AIRFLOW_CONN_DOCKER_DEFAULT: >-
@@ -1066,7 +1125,84 @@ services:
       DBT_TARGET_PATH: /tmp/dbt_target
       DBT_LOG_PATH: /tmp/dbt_logs
 
-    volumes:
+    command:
+      - bash
+      - -c
+      - |
+        set -e
+
+        echo "=========================================="
+        echo "Airflow initialization"
+        echo "=========================================="
+
+        echo "Migrating Airflow database..."
+        airflow db migrate
+
+        echo
+        echo "=========================================="
+        echo "Connections"
+        echo "=========================================="
+
+        airflow connections get spark_default
+        airflow connections get kafka_default
+        airflow connections get docker_default
+
+        echo
+        echo "=========================================="
+        echo "Creating Airflow admin user"
+        echo "=========================================="
+
+        if airflow users list | grep -q '^admin'; then
+            echo "User 'admin' already exists."
+        else
+            airflow users create \
+              --username admin \
+              --firstname Admin \
+              --lastname Admin \
+              --role Admin \
+              --email admin@example.com \
+              --password admin
+
+            echo "User 'admin' created."
+        fi
+
+        echo
+        echo "Airflow initialization complete."
+
+    profiles:
+      - core
+      - orchestrator
+
+
+  # AIRFLOW API SERVER
+  airflow-apiserver:
+    build:
+      context: .
+      dockerfile: ./infra/airflow/Dockerfile
+
+    image: jobscrapper-airflow:0.1
+
+    container_name: airflow-apiserver
+    hostname: airflow-apiserver
+    restart: unless-stopped
+
+    mem_limit: 1g
+    cpus: 1
+
+    depends_on:
+      airflow-postgres:
+        condition: service_healthy
+
+      airflow-init:
+        condition: service_completed_successfully
+
+    ports:
+      - "3000:8080"
+
+    environment:
+      <<: *airflow-environment
+
+    volumes: &airflow-volumes
       - ./infra/airflow/dags:/opt/airflow/dags:ro
       - ./airflow/plugins:/opt/airflow/plugins
       - airflow_logs:/opt/airflow/logs
@@ -1077,48 +1213,173 @@ services:
       - ./infra/internal_data:/opt/data
       - ./infra/dbt:/dbt:ro
 
-    # airflow standalone initializes the DB, creates the user and starts
-    # the Airflow components as one all-in-one deployment.
     command:
       - airflow
-      - standalone
+      - api-server
 
-    healthcheck:
-      test:
-        - CMD
-        - curl
-        - --fail
-        - http://localhost:8080/api/v2/monitor/health
-      interval: 15s
-      timeout: 5s
-      retries: 20
-      start_period: 45s
 
-  trino:
-    image: trinodb/trino
-    container_name: trino
+    profiles:
+      - core
+      - orchestrator
+
+
+  # AIRFLOW SCHEDULER
+
+  airflow-scheduler:
+    image: jobscrapper-airflow:0.1
+
+    container_name: airflow-scheduler
+    hostname: airflow-scheduler
     restart: unless-stopped
 
-    ports:
-      - "9090:8080"
-
-    mem_limit: 1500m
+    # Given priority headroom: LocalExecutor runs task processes inside
+    # this container, so it's the service most sensitive to the
+    # starvation that was causing DAG lag during Spark runs.
+    mem_limit: 1g
     cpus: 1
+
+    depends_on:
+      airflow-postgres:
+        condition: service_healthy
+
+      airflow-init:
+        condition: service_completed_successfully
+
+      broker:
+        condition: service_started
+
+      spark:
+        condition: service_healthy
+
+      spark-worker:
+        condition: service_healthy
+
+    environment:
+      <<: *airflow-environment
+
+    volumes: *airflow-volumes
+
+    command:
+      - airflow
+      - scheduler
+
+
+    profiles:
+      - core
+      - orchestrator
+
+
+  # AIRFLOW DAG PROCESSOR
+
+  airflow-dag-processor:
+    image: jobscrapper-airflow:0.1
+
+    container_name: airflow-dag-processor
+    hostname: airflow-dag-processor
+    restart: unless-stopped
+
+    mem_limit: 512m
+    cpus: 0.5
+
+    depends_on:
+      airflow-postgres:
+        condition: service_healthy
+
+      airflow-init:
+        condition: service_completed_successfully
+
+      broker_init:
+        condition: service_completed_successfully
+
+    environment:
+      <<: *airflow-environment
+
+    volumes: *airflow-volumes
+
+    command:
+      - airflow
+      - dag-processor
+
+    profiles:
+      - core
+      - orchestrator
+
+
+  # AIRFLOW TRIGGERER
+
+  airflow-triggerer:
+    image: jobscrapper-airflow:0.1
+
+    container_name: airflow-triggerer
+    hostname: airflow-triggerer
+    restart: unless-stopped
+
+    mem_limit: 512m
+    cpus: 0.5
+
+    depends_on:
+      airflow-postgres:
+        condition: service_healthy
+
+      airflow-init:
+        condition: service_completed_successfully
+
+      broker_init:
+        condition: service_completed_successfully
+
+    environment:
+      <<: *airflow-environment
+
+    volumes: *airflow-volumes
+
+    command:
+      - airflow
+      - triggerer
+
+
+    profiles:
+      - core
+      - orchestrator
+
+# Trino
+  trino:
+    image: trinodb/trino
+    ports:
+      - 9090:8080
+
+    mem_limit: 2g
+    cpus: 2
 
     volumes:
       - ./infra/trino/coordinator:/etc/trino:ro
-
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/v1/info"]
       interval: 10s
       timeout: 5s
-      retries: 20
-      start_period: 20s
-
-    environment:
+      retries: 10
+    environment: &trino-env
       TRINO_CLIENT_ID: ${TRINO_CLIENT_ID}
       TRINO_CLIENT_SECRET: ${TRINO_CLIENT_SECRET}
+      
+  
+  trino-worker:
+    image: trinodb/trino
 
+    mem_limit: 2g
+    cpus: 2
+
+    volumes:
+      - ./infra/trino/worker:/etc/trino:ro
+    depends_on:
+      trino:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/v1/info"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    environment:
+      <<: *trino-env
 
 volumes:
   kafka_data:
