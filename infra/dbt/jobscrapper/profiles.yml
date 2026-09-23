@@ -1,11 +1,11 @@
 trino:
   target: dev
   outputs:
-    gold:
+    prod:
       type: trino
       user: admin
       host: trino
       port: 8080
       catalog: iceberg
       schema: golds
-      threads: 4
+      threads: 2

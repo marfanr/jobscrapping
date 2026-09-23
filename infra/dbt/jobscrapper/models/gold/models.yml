@@ -2,7 +2,19 @@ models:
   - name: skills_dim
     columns:
       - name: id
+        constraints:
+          - type: unique
       - name: skills
+        quote: false
+        constraints:
+          - type: unique
+  
+  - name: majors_dim
+    columns:
+      - name: id
+        constraints:
+          - type: unique
+      - name: majors
         quote: false
         constraints:
           - type: unique

@@ -380,10 +380,7 @@ services:
         echo "Polaris initialization"
         echo "=========================================="
 
-        # ============================================================
-        # 1. Get Polaris root token
-        # ============================================================
-
+        # Get Polaris root token
         echo "[1/6] Requesting Polaris token..."
 
         TOKEN=$$(curl -sf \
@@ -404,10 +401,7 @@ services:
 
         AUTH_HEADER="Authorization: Bearer $${TOKEN}"
 
-        # ============================================================
-        # 2. Create service principal
-        # ============================================================
-
+        # Create service principal
         echo ""
         echo "[2/6] Creating principal: $${PRINCIPAL_NAME}"
 
@@ -446,10 +440,7 @@ services:
             ;;
         esac
 
-        # ============================================================
-        # 3. Create warehouse catalog
-        # ============================================================
-
+        # Create warehouse catalog
         echo ""
         echo "[3/6] Creating catalog: $${CATALOG_NAME}"
 
@@ -498,10 +489,7 @@ services:
             ;;
         esac
 
-        # ============================================================
-        # 4. Create principal role
-        # ============================================================
-
+        # Create principal role
         echo ""
         echo "[4/6] Creating principal role: $${PRINCIPAL_ROLE}"
 
@@ -534,9 +522,7 @@ services:
             ;;
         esac
 
-        # ============================================================
-        # 5. Create catalog role + privilege
-        # ============================================================
+        # Create catalog role + privilege
 
         echo ""
         echo "[5/6] Creating catalog role: $${CATALOG_ROLE}"
@@ -603,18 +589,7 @@ services:
             ;;
         esac
 
-        # ============================================================
-        # 6. Wire RBAC
-        #
-        # principal
-        #    ↓
-        # principal role
-        #    ↓
-        # catalog role
-        #    ↓
-        # CATALOG_MANAGE_CONTENT
-        # ============================================================
-
+        # RBAC
         echo ""
         echo "[6/6] Connecting RBAC roles..."
 
@@ -761,7 +736,7 @@ services:
       SPARK_WORKER_HOST: "spark-worker"
       SPARK_WORKER_PORT: "7078"
       SPARK_WORKER_WEBUI_PORT: "8081"
-      SPARK_WORKER_CORES: "4"
+      SPARK_WORKER_CORES: "2"
       SPARK_WORKER_MEMORY: "2g"
       SPARK_WORKER_DIR: /opt/spark/work
       HOME: /tmp
