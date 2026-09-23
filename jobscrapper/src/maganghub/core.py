@@ -1,10 +1,12 @@
 import asyncio
 from playwright.async_api import async_playwright, Locator
 
-import json
 from ..loader import registerJob
 from ..jobscrapper import Jobscrapper
 from ..utils import get_text
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
+
 import random
 import requests
 
@@ -17,6 +19,7 @@ class MaganghubScrapper:
         self.maganghub_cities = self.get_cities()
         self.maganghub_provinces = self.get_provinces()
         self.base_url = "https://maganghub.kemnaker.go.id"
+        self.tz = self.config.get("timezone") or "Asia/Jakarta"
 
     def get_cities(self):
         url = "https://api.kemnaker.go.id/maganghub/onboarding/v2/cities"
@@ -90,11 +93,10 @@ class MaganghubScrapper:
             await page.goto(url, wait_until="domcontentloaded", timeout=60000)
 
             max_pages_el = page.locator("nav[role='navigation'] li")
-            print(await max_pages_el.count())
             max_pages = int(
                 await max_pages_el.nth(await max_pages_el.count() - 2).inner_text()
             )
-            print(f"max pages : {max_pages}")
+            print(f"found {max_pages} pages")
 
             for idx in range(max_pages):
                 url = (
@@ -121,17 +123,6 @@ class MaganghubScrapper:
                     if "Ramah Disabilitas" in quota:
                         quota = await get_text(quota_el.nth(1))
                         applicant = await get_text(quota_el.nth(2))
-
-                    print(
-                        f"job name: {job_name}\n"
-                        f"company name : {company}\n"
-                        f"lokasi : {prov_obj['name']}\n"
-                        f"Field : {field}\n"
-                        f"works day: {works_day}\n"
-                        f"link: {href}\n"
-                        f"quota: {quota}, apply: {applicant}\n"
-                        "\n"
-                    )
                     
                     await self.scrap_job_detail(
                         link=href,
@@ -160,6 +151,10 @@ class MaganghubScrapper:
         applicant: int,
         location: str
         ):
+        applicant = applicant or 0
+        applicant = applicant or 0
+        works_day = works_day or 0
+        
         page = await self.scrapper.context.new_page()
         try:
             await page.goto(link, wait_until="domcontentloaded", timeout=60000)
@@ -173,7 +168,6 @@ class MaganghubScrapper:
                 if h2 is not None:
                     if "Deskripsi Lowongan" in h2:
                         content = await c.locator("p").first.inner_text()
-                        print(f"deskrips: {content}\n")
                         details += content
                     
                     elif "Kualifikasi" in h2:
@@ -196,23 +190,28 @@ class MaganghubScrapper:
                         loc =  c.locator("iframe[title='Google Map Embed']")
                         location = None
                         if await loc.count() > 0:
-                            details += await loc.get_attribute("src")                            
-                               
+                            details += await loc.get_attribute("src")
+
+            now = datetime.now(ZoneInfo(self.tz))
             gathered_job = {
                 "job_name": job_name,
                 "url": link,
                 "location": location,
                 "details": details,
-                "source": "linkedin",
+                "source": "maganghub",
                 "requirements": ", ".join(list(requirements)),
                 "company": company_name,
-                "keywoard": str.lower(field),
+                "keyword": str.lower(field),
                 "applicant": applicant,
-                "quota": quota
+                "quota": quota,
+                "scraped_at": now.isoformat(),
             }
+            
+            print(f"receive: {job_name} at {company_name} (maganghub)")
 
             # publish kafka
-            self.scrapper.producer.send('rawjobs', gathered_job)
-                    
+            self.scrapper.producer.send('rawjobs', gathered_job, link.encode("utf-8"))
+               
+        # except     
         finally:
             await page.close()

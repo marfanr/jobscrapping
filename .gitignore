@@ -1,3 +1,5 @@
 airflow/
 config
 __pycache__
+.vscode
+env
