@@ -1,8 +1,0 @@
-version: 2
-
-sources:
-  - name: warehouse_gold
-    database: iceberg
-    schema: bronze
-    tables:
-      - name: jobs

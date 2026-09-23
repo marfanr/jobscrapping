@@ -3,7 +3,6 @@ version: "3.9"
 services:
 
   # SEAWEEDFS
-
   master:
     image: chrislusf/seaweedfs
     container_name: seaweedfs-master
@@ -24,8 +23,6 @@ services:
     profiles:
       - core
       - s3
-
-
   volume:
     image: chrislusf/seaweedfs
     container_name: seaweedfs-volume
@@ -239,7 +236,6 @@ services:
 
 
   # APACHE POLARIS
-
   polaris-db:
     image: postgres:16
     container_name: polaris-db
@@ -313,37 +309,30 @@ services:
         condition: service_completed_successfully
 
     environment:
-
-      # ----------------------------------------------------------
-      # Polaris bootstrap
-      # realm, client-id, client-secret
-      # ----------------------------------------------------------
-
+      # polaris
       polaris.realm-context.realms: "POLARIS"
-
-      # Disable telemetry
       quarkus.otel.sdk.disabled: "true"
 
       # postgres
       POLARIS_PERSISTENCE_TYPE: relational-jdbc
-
       QUARKUS_DATASOURCE_DB_KIND: postgresql
       QUARKUS_DATASOURCE_JDBC_URL: jdbc:postgresql://polaris-db:5432/polaris
       QUARKUS_DATASOURCE_USERNAME: polaris
       QUARKUS_DATASOURCE_PASSWORD: polaris_password
 
-      # ----------------------------------------------------------
       # S3 / SeaweedFS
-      # ----------------------------------------------------------
       AWS_REGION: us-east-1
       AWS_ACCESS_KEY_ID: admin
       AWS_SECRET_ACCESS_KEY: password
+      AWS_ENDPOINT_URL: http://s3:8333
 
-      # ----------------------------------------------------------
-      # Allow S3-compatible storage
-      # ----------------------------------------------------------
       polaris.features."SUPPORTED_CATALOG_STORAGE_TYPES": '["S3"]'
       polaris.features."ALLOW_SETTING_S3_ENDPOINTS": "true"
+      polaris.features."DROP_WITH_PURGE_ENABLED": "true"
+      polaris.features."ENFORCE_PRINCIPAL_CREDENTIAL_REQUIREMENT": "false"
+      polaris.features."ALLOW_UNEXTERNALIZED_METADATA": "true"
+      polaris.features."ALLOW_SPECIFYING_FILE_IO_IMPL": "true"
+      polaris.features."ENFORCE_CATALOG_STORAGE_TYPE": "true"
 
     healthcheck:
       test:
@@ -366,15 +355,12 @@ services:
   polaris-init:
     image: alpine:3.21
     container_name: polaris-init
-    environment:
-      - AZURE_STORAGE_SAS_TOKEN=${AZURE_STORAGE_SAS_TOKEN}
-      - AZURE_TENANT_ID=${AZURE_TENANT_ID}
-
     restart: "no"
 
     depends_on:
       polaris:
         condition: service_healthy
+
     entrypoint:
       - /bin/sh
       - -c
@@ -383,15 +369,26 @@ services:
 
         apk add --no-cache curl jq
 
+        POLARIS_URL="http://polaris:8181"
+
+        PRINCIPAL_NAME="warehouse-principal"
+        PRINCIPAL_ROLE="warehouse"
+        CATALOG_NAME="warehouse"
+        CATALOG_ROLE="warehouse-catalog-role"
+
         echo "=========================================="
         echo "Polaris initialization"
         echo "=========================================="
 
-        echo "Requesting Polaris token..."
+        # ============================================================
+        # 1. Get Polaris root token
+        # ============================================================
+
+        echo "[1/6] Requesting Polaris token..."
 
         TOKEN=$$(curl -sf \
           -X POST \
-          http://polaris:8181/api/catalog/v1/oauth/tokens \
+          "$${POLARIS_URL}/api/catalog/v1/oauth/tokens" \
           -H "Content-Type: application/x-www-form-urlencoded" \
           --user root:s3cret \
           -d "grant_type=client_credentials" \
@@ -405,23 +402,63 @@ services:
 
         echo "Token acquired."
 
-        echo
-        echo "=== Existing catalogs ==="
+        AUTH_HEADER="Authorization: Bearer $${TOKEN}"
 
-        curl -sf \
-          http://polaris:8181/api/management/v1/catalogs \
-          -H "Authorization: Bearer $${TOKEN}" \
-          | jq .
+        # ============================================================
+        # 2. Create service principal
+        # ============================================================
 
-        echo
-        echo "=== Creating warehouse catalog ==="
+        echo ""
+        echo "[2/6] Creating principal: $${PRINCIPAL_NAME}"
+
+        HTTP_CODE=$$(curl -s \
+          -o /tmp/principal.json \
+          -w "%{http_code}" \
+          -X POST \
+          "$${POLARIS_URL}/api/management/v1/principals" \
+          -H "$${AUTH_HEADER}" \
+          -H "Content-Type: application/json" \
+          -d "{
+            \"name\": \"$${PRINCIPAL_NAME}\",
+            \"type\": \"SERVICE\"
+          }")
+
+        case "$${HTTP_CODE}" in
+          200|201)
+            echo "Principal created."
+
+            CLIENT_ID=$$(jq -r '.credentials.clientId // empty' /tmp/principal.json)
+            CLIENT_SECRET=$$(jq -r '.credentials.clientSecret // empty' /tmp/principal.json)
+
+            echo "Client ID:     $${CLIENT_ID}"
+            echo "Client Secret: $${CLIENT_SECRET}"
+            ;;
+
+          409)
+            echo "Principal already exists. Skipping creation."
+            echo "Existing credentials are not returned by Polaris."
+            ;;
+
+          *)
+            echo "ERROR: Failed to create principal."
+            cat /tmp/principal.json
+            exit 1
+            ;;
+        esac
+
+        # ============================================================
+        # 3. Create warehouse catalog
+        # ============================================================
+
+        echo ""
+        echo "[3/6] Creating catalog: $${CATALOG_NAME}"
 
         HTTP_CODE=$$(curl -s \
           -o /tmp/catalog-response.json \
           -w "%{http_code}" \
           -X POST \
-          http://polaris:8181/api/management/v1/catalogs \
-          -H "Authorization: Bearer $${TOKEN}" \
+          "$${POLARIS_URL}/api/management/v1/catalogs" \
+          -H "$${AUTH_HEADER}" \
           -H "Content-Type: application/json" \
           -d '{
             "catalog": {
@@ -449,25 +486,204 @@ services:
           200|201)
             echo "Catalog created."
             ;;
+
           409)
-            echo "Catalog already exists."
+            echo "Catalog already exists. Skipping creation."
             ;;
+
           *)
             echo "ERROR: Failed to create catalog."
+            cat /tmp/catalog-response.json
+            exit 1
             ;;
         esac
 
+        # ============================================================
+        # 4. Create principal role
+        # ============================================================
 
-        echo
-        echo "=== Polaris catalogs ==="
+        echo ""
+        echo "[4/6] Creating principal role: $${PRINCIPAL_ROLE}"
 
-        curl -sf \
-          http://polaris:8181/api/management/v1/catalogs \
-          -H "Authorization: Bearer $${TOKEN}" \
-          | jq .
+        HTTP_CODE=$$(curl -s \
+          -o /tmp/principal-role.json \
+          -w "%{http_code}" \
+          -X POST \
+          "$${POLARIS_URL}/api/management/v1/principal-roles" \
+          -H "$${AUTH_HEADER}" \
+          -H "Content-Type: application/json" \
+          -d "{
+            \"principalRole\": {
+              \"name\": \"$${PRINCIPAL_ROLE}\"
+            }
+          }")
 
-        echo
-        echo "Polaris initialization complete."
+        case "$${HTTP_CODE}" in
+          200|201)
+            echo "Principal role created."
+            ;;
+
+          409)
+            echo "Principal role already exists."
+            ;;
+
+          *)
+            echo "ERROR: Failed to create principal role."
+            cat /tmp/principal-role.json
+            exit 1
+            ;;
+        esac
+
+        # ============================================================
+        # 5. Create catalog role + privilege
+        # ============================================================
+
+        echo ""
+        echo "[5/6] Creating catalog role: $${CATALOG_ROLE}"
+
+        HTTP_CODE=$$(curl -s \
+          -o /tmp/catalog-role.json \
+          -w "%{http_code}" \
+          -X POST \
+          "$${POLARIS_URL}/api/management/v1/catalogs/$${CATALOG_NAME}/catalog-roles" \
+          -H "$${AUTH_HEADER}" \
+          -H "Content-Type: application/json" \
+          -d "{
+            \"catalogRole\": {
+              \"name\": \"$${CATALOG_ROLE}\"
+            }
+          }")
+
+        case "$${HTTP_CODE}" in
+          200|201)
+            echo "Catalog role created."
+            ;;
+
+          409)
+            echo "Catalog role already exists."
+            ;;
+
+          *)
+            echo "ERROR: Failed to create catalog role."
+            cat /tmp/catalog-role.json
+            exit 1
+            ;;
+        esac
+
+        echo ""
+        echo "Granting CATALOG_MANAGE_CONTENT..."
+
+        HTTP_CODE=$$(curl -s \
+          -o /tmp/grant.json \
+          -w "%{http_code}" \
+          -X PUT \
+          "$${POLARIS_URL}/api/management/v1/catalogs/$${CATALOG_NAME}/catalog-roles/$${CATALOG_ROLE}/grants" \
+          -H "$${AUTH_HEADER}" \
+          -H "Content-Type: application/json" \
+          -d '{
+            "grant": {
+              "type": "catalog",
+              "privilege": "CATALOG_MANAGE_CONTENT"
+            }
+          }')
+
+        case "$${HTTP_CODE}" in
+          200|201|204)
+            echo "CATALOG_MANAGE_CONTENT granted."
+            ;;
+
+          409)
+            echo "Grant already exists."
+            ;;
+
+          *)
+            echo "ERROR: Failed to grant catalog privilege."
+            cat /tmp/grant.json
+            exit 1
+            ;;
+        esac
+
+        # ============================================================
+        # 6. Wire RBAC
+        #
+        # principal
+        #    ↓
+        # principal role
+        #    ↓
+        # catalog role
+        #    ↓
+        # CATALOG_MANAGE_CONTENT
+        # ============================================================
+
+        echo ""
+        echo "[6/6] Connecting RBAC roles..."
+
+        echo "Assigning catalog role to principal role..."
+
+        HTTP_CODE=$$(curl -s \
+          -o /tmp/catalog-role-assignment.json \
+          -w "%{http_code}" \
+          -X PUT \
+          "$${POLARIS_URL}/api/management/v1/principal-roles/$${PRINCIPAL_ROLE}/catalog-roles/$${CATALOG_NAME}" \
+          -H "$${AUTH_HEADER}" \
+          -H "Content-Type: application/json" \
+          -d "{
+            \"catalogRole\": {
+              \"name\": \"$${CATALOG_ROLE}\"
+            }
+          }")
+
+        case "$${HTTP_CODE}" in
+          200|201|204)
+            echo "Catalog role assigned to principal role."
+            ;;
+
+          409)
+            echo "Catalog role assignment already exists."
+            ;;
+
+          *)
+            echo "ERROR: Failed to assign catalog role."
+            cat /tmp/catalog-role-assignment.json
+            exit 1
+            ;;
+        esac
+
+        echo "Assigning principal role to principal..."
+
+        HTTP_CODE=$$(curl -s \
+          -o /tmp/principal-role-assignment.json \
+          -w "%{http_code}" \
+          -X PUT \
+          "$${POLARIS_URL}/api/management/v1/principals/$${PRINCIPAL_NAME}/principal-roles" \
+          -H "$${AUTH_HEADER}" \
+          -H "Content-Type: application/json" \
+          -d "{
+            \"principalRole\": {
+              \"name\": \"$${PRINCIPAL_ROLE}\"
+            }
+          }")
+
+        case "$${HTTP_CODE}" in
+          200|201|204)
+            echo "Principal role assigned to principal."
+            ;;
+
+          409)
+            echo "Principal role assignment already exists."
+            ;;
+
+          *)
+            echo "ERROR: Failed to assign principal role."
+            cat /tmp/principal-role-assignment.json
+            exit 1
+            ;;
+        esac
+
+        echo ""
+        echo "=========================================="
+        echo "Polaris initialization completed."
+        echo "=========================================="
 
   # SPARK MASTER
 
@@ -1085,6 +1301,10 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
+    environment: &trino-env
+      TRINO_CLIENT_ID: ${TRINO_CLIENT_ID}
+      TRINO_CLIENT_SECRET: ${TRINO_CLIENT_SECRET}
+      
   
   trino-worker:
     image: trinodb/trino
@@ -1098,6 +1318,8 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
+    environment:
+      <<: *trino-env
 
 volumes:
   kafka_data:

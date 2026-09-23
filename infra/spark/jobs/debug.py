@@ -9,8 +9,8 @@ try:
     )
     
     # spark.sql("SHOW TABLES IN warehouse.silvers").show(truncate=False);
-    # spark.sql("SELECT * FROM warehouse.bronze.jobs").show(truncate=False)
     spark.sql("SELECT * FROM warehouse.bronze.jobs").show(truncate=False)
+    spark.sql("SELECT * FROM warehouse.silvers.job_skills_list").show(truncate=False)
     # spark.sql("""
     #     SELECT 
     #         snapshot_id,
@@ -22,7 +22,7 @@ try:
     #     ORDER BY added_rows DESC
     # """).show(truncate=False)
     
-    spark.sql("SHOW TBLPROPERTIES warehouse.silvers.job_majors_list").show(truncate=False)
+    # spark.sql("SHOW TBLPROPERTIES warehouse.silvers.job_majors_list").show(truncate=False)
     
     spark.sql("SELECT COUNT(*) FROM warehouse.bronze.jobs").show(truncate=False)
     

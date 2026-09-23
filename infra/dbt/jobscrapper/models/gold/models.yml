@@ -1,0 +1,8 @@
+models:
+  - name: skills_dim
+    columns:
+      - name: id
+      - name: skills
+        quote: false
+        constraints:
+          - type: unique
