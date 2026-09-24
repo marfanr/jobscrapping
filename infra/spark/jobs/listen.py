@@ -17,7 +17,7 @@ from pyspark.sql.functions import (
 
 spark = (
     SparkSession.builder
-    .appName("KafkaStream")
+    .appName("JobsKafkaIngestion")
     .config("spark.sql.adaptive.enabled", "false")
     .config("spark.cores.max", "1")
     .getOrCreate()
@@ -31,6 +31,8 @@ CREATE TABLE IF NOT EXISTS warehouse.bronze.jobs (
     job_name STRING,
     url STRING,
     location STRING,
+    city STRING,
+    province STRING,
     details STRING,
     source STRING,
     keyword STRING,
@@ -60,6 +62,8 @@ schema = StructType([
     StructField('job_name', StringType()),
     StructField('url', StringType()),
     StructField('location', StringType()),
+    StructField('city', StringType()),
+    StructField('province', StringType()),
     StructField('details', StringType()),
     StructField('source', StringType()),
     StructField('keyword', StringType()),
@@ -76,7 +80,7 @@ schema = StructType([
 ])
 
 df = spark \
-    .readStream \
+    .read \
     .format("kafka") \
     .option("kafka.bootstrap.servers", "broker:19092") \
     .option("subscribe", "rawjobs") \
@@ -115,11 +119,14 @@ cleaned_jobs = (
 )
 
 final_job = (
-    cleaned_jobs.select(
+    cleaned_jobs
+    .select(
         "company",
         "job_name",
         "url",
         "location",
+        "city",
+        "province",
         "details",
         "source",
         "keyword",
@@ -140,17 +147,16 @@ final_job = (
         "scraped_at",
         "ingested_at"
     )
+    .drop_duplicates(["url"])
 )
         
 query = (
     final_job
-    .writeStream
+    .write
     .format("iceberg")
-    .outputMode("append")
-    .option("truncate", "false")
-    .option("checkpointLocation", "/tmp/checkpoint/rawjobs")
-    .toTable("warehouse.bronze.jobs")
+    .mode("append")
+    .save("warehouse.bronze.jobs")
 )
 
-query.awaitTermination()
-# query.stop()
+print("done ingestion...")
+print(f"affected {final_job.count()} rows")

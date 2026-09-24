@@ -1,0 +1,12 @@
+models:
+  - name: provinces
+    schema: silvers
+    columns:
+      - name: kafka_key
+      - name: province
+
+  - name: cities
+    schema: silvers
+    columns:
+      - name: kafka_key
+      - name: city

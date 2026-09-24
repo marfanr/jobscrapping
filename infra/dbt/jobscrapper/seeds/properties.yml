@@ -1,0 +1,8 @@
+seeds:
+  - name: seed_provinces
+    description: Infromation provinces names on indonesian
+    columns:
+      - name: name
+      - name: name_en
+    config:
+      enabled: true

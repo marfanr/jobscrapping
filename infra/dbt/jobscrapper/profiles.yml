@@ -1,5 +1,5 @@
 trino:
-  target: dev
+  target: prod
   outputs:
     prod:
       type: trino
@@ -7,5 +7,5 @@ trino:
       host: trino
       port: 8080
       catalog: iceberg
-      schema: golds
+      schema: gold
       threads: 2

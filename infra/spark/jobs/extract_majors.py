@@ -24,10 +24,10 @@ try:
         .getOrCreate()
     )
     
-    spark.sql("CREATE NAMESPACE IF NOT EXISTS warehouse.silvers")
+    spark.sql("CREATE NAMESPACE IF NOT EXISTS warehouse.silver")
     
     spark.sql("""
-    CREATE TABLE IF NOT EXISTS warehouse.silvers.job_majors_list (
+    CREATE TABLE IF NOT EXISTS warehouse.silver.job_majors_list (
         kafka_key STRING,
         majors ARRAY<STRING>,
         updated_at TIMESTAMP
@@ -71,7 +71,7 @@ try:
             
         return pd.Series(results)
     
-    props_df = spark.sql("SHOW TBLPROPERTIES warehouse.silvers.job_majors_list")
+    props_df = spark.sql("SHOW TBLPROPERTIES warehouse.silver.job_majors_list")
     props = {row["key"]: row["value"] for row in props_df.collect()}
     last_processed_snapshot = props.get("bronze.last_processed_snapshot_id")
     
@@ -127,13 +127,13 @@ try:
     
     
     spark.sql(f"""
-        ALTER TABLE warehouse.silvers.job_majors_list
+        ALTER TABLE warehouse.silver.job_majors_list
         SET TBLPROPERTIES ('bronze.last_processed_snapshot_id'='{latest_bronze_snapshot}')
     """)
     
     
     spark.sql("""
-        MERGE INTO warehouse.silvers.job_majors_list m
+        MERGE INTO warehouse.silver.job_majors_list m
         USING incoming_majors i
         ON m.kafka_key = i.kafka_key
         WHEN MATCHED THEN

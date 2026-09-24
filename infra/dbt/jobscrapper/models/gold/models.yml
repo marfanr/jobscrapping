@@ -1,5 +1,5 @@
 models:
-  - name: skills_dim
+  - name: dim_skills
     columns:
       - name: id
         constraints:
@@ -9,7 +9,7 @@ models:
         constraints:
           - type: unique
   
-  - name: majors_dim
+  - name: dim_majors
     columns:
       - name: id
         constraints:
