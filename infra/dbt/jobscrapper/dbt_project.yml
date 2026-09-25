@@ -21,3 +21,5 @@ seeds:
   jobscrapper:
     +enabled: true
     +schema: seed
+    +config:
+      +batch_size: 1000

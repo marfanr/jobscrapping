@@ -1,16 +1,22 @@
 version: 2
 
 sources:
-  - name: warehouse_bronze
+  - name: bronze
     database: iceberg
     schema: bronze
     tables:
       - name: jobs
 
-  - name: warehouse_silvers
+  - name: silver
     database: iceberg
-    schema: silvers
+    schema: silver
     tables:
       - name: job_skills_list
       - name: job_majors_list
+
+  - name: seed
+    database: iceberg
+    schema: seed
+    tables:
+      - name: seed_villages
       

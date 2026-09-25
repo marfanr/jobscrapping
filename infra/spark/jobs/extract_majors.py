@@ -2,11 +2,7 @@ from pyspark.sql import SparkSession, Row
 from pyspark.sql.functions import (
     pandas_udf,
     col,
-    current_timestamp,
-    expr,
-    array_distinct,
-    flatten,
-    collect_list
+    current_timestamp
 )
 from pyspark.sql.types import (
     ArrayType,
@@ -35,15 +31,19 @@ try:
     USING ICEBERG
     """)
     
-    majors_list = pd.read_csv("/opt/data/majors.csv")
+    majors_list = spark.read.option("header", True).csv("/opt/data/majors.csv")
+    
     target_majors = (
-        majors_list['majors']
-        .dropna()
-        .drop_duplicates()
-        .astype(str)
-        .tolist()    
+        str(row["majors"])
+        for row in (
+            majors_list
+            .select("majors")
+            .dropna()
+            .dropDuplicates()
+            .collect()
+        )
     )
-    broadcast_keywords = spark.sparkContext.broadcast(target_majors)
+    broadcast_keywords = spark.sparkContext.broadcast(set(target_majors))
 
     _matcher = None
     _indo_nlp = None

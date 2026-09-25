@@ -6,3 +6,10 @@ seeds:
       - name: name_en
     config:
       enabled: true
+  
+  - name: seed_cities
+    description: Infromation cities names on indonesian
+    columns:
+      - name: name
+    config:
+      enabled: true
