@@ -14,7 +14,7 @@ models:
   jobscrapper:
     golds:
       +schema: golds
-    solvers:
+    silvers:
       +schema: silver
 
 seeds:

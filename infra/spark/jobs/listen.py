@@ -19,7 +19,6 @@ spark = (
     SparkSession.builder
     .appName("JobsKafkaIngestion")
     .config("spark.sql.adaptive.enabled", "false")
-    .config("spark.cores.max", "1")
     .getOrCreate()
 )
 
@@ -147,7 +146,7 @@ final_job = (
         "scraped_at",
         "ingested_at"
     )
-    .drop_duplicates(["url"])
+    .drop_duplicates(["kafka_key"])
 )
         
 query = (
@@ -159,4 +158,13 @@ query = (
 )
 
 print("done ingestion...")
-print(f"affected {final_job.count()} rows")
+
+new_data = (spark.sql("""
+        SELECT 
+            summary['added-records'] AS added_records
+        FROM warehouse.bronze.jobs.snapshots
+        ORDER BY committed_at DESC LIMIT 1
+    """)
+    .first()['added_records']
+)
+print(f"affected {new_data} rows")

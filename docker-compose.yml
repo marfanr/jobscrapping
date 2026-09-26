@@ -707,8 +707,8 @@ services:
     hostname: spark-worker
     restart: unless-stopped
 
-    mem_limit: 2000m
-    cpus: 2
+    mem_limit: 4g
+    cpus: 1.5
 
     depends_on:
       spark:
@@ -723,7 +723,7 @@ services:
       SPARK_WORKER_PORT: "7078"
       SPARK_WORKER_WEBUI_PORT: "8081"
       SPARK_WORKER_CORES: "2"
-      SPARK_WORKER_MEMORY: "2g"
+      SPARK_WORKER_MEMORY: "3g"
       SPARK_WORKER_DIR: /opt/spark/work
       HOME: /tmp
 

@@ -13,7 +13,7 @@ try:
     )
     
     if spark.catalog.tableExists("warehouse.seed.seed_villages"):
-        spark.stop()
+        spark.stop()        
         sys.exit(0)
         
     

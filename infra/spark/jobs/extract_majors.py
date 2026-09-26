@@ -2,8 +2,10 @@ from pyspark.sql import SparkSession, Row
 from pyspark.sql.functions import (
     pandas_udf,
     col,
-    current_timestamp
+    current_timestamp,
+    row_number
 )
+from pyspark.sql.window import Window
 from pyspark.sql.types import (
     ArrayType,
     StringType
@@ -109,10 +111,11 @@ try:
         raw_jobs
         .select("kafka_key", "details", "company")
         .filter(col("kafka_key").isNotNull())
-        .dropDuplicates(["kafka_key", "company"])
+        .dropDuplicates(["kafka_key"])
         .repartition(2)
     )
     
+    window_spec = Window.orderBy(col("updated_at").desc_nulls_last())
     majors_incoming = (
         sql
         .withColumn("details", extract_majors("details"))
@@ -121,6 +124,9 @@ try:
             col("details").alias("majors"),
         )
         .withColumn("updated_at", current_timestamp())
+        .withColumn("rn", row_number().over(window_spec))
+        .filter(col("rn")==1)
+        .drop("rn")
     )
     
     majors_incoming.createOrReplaceTempView("incoming_majors")
