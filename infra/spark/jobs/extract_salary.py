@@ -26,6 +26,22 @@ try:
             updated_at TIMESTAMP
         )
         USING ICEBERG
+        TBLPROPERTIES (
+            'format-version'='2',
+            'write.merge.mode'='merge-on-read',
+            'write.update.mode'='merge-on-read',
+            'write.delete.mode'='merge-on-read'
+        )
+    """)
+
+    spark.sql("""
+        ALTER TABLE warehouse.silver.job_salary
+        SET TBLPROPERTIES (
+            'format-version'='2',
+            'write.merge.mode'='merge-on-read',
+            'write.update.mode'='merge-on-read',
+            'write.delete.mode'='merge-on-read'
+        )
     """)
     
     # Incremental read from bronze
@@ -143,7 +159,7 @@ try:
         )
 
 
-    window = Window.partitionBy(col("now").desc())
+    window_spec = Window.partitionBy("kafka_key").orderBy(col("now").desc())
     incoming = (
         sql
         .withColumn(
@@ -160,11 +176,8 @@ try:
                 col("source")
             )
         )
-        .withColumn(
-            "now",
-            current_timestamp()
-        )
-        .withColumn("rn", row_number().over(window))
+        .withColumn("now", current_timestamp())
+        .withColumn("rn", row_number().over(window_spec))
         .filter(col("rn") == 1)
         .drop("rn")
     )

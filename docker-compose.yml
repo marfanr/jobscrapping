@@ -676,6 +676,7 @@ services:
       - ./infra/spark/conf:/opt/spark/conf:ro
       - ./infra/spark/jobs:/opt/spark/jobs:ro
       - spark_events:/opt/spark/events
+      - checkpoints:/checkpoints
 
     command:
       - /opt/spark/sbin/start-master.sh
@@ -732,6 +733,7 @@ services:
       - ./infra/spark/jobs:/opt/spark/jobs:ro
       - spark_events:/opt/spark/events
       - ./infra/internal_data:/opt/data
+      - checkpoints:/checkpoints
 
     command:
       - /opt/spark/sbin/start-worker.sh
@@ -770,6 +772,7 @@ services:
 
         mkdir -p /opt/spark/events
         chmod 777 /opt/spark/events
+        chmod 777 /checkpoints
 
         echo "Permissions:"
         ls -ld /opt/spark/events
@@ -1032,9 +1035,8 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./infra/internal_data:/opt/data
       - ./infra/dbt:/dbt:ro
+      - checkpoints:/checkpoints
 
-    # airflow standalone initializes the DB, creates the user and starts
-    # the Airflow components as one all-in-one deployment.
     command:
       - airflow
       - standalone
@@ -1124,3 +1126,5 @@ volumes:
   seawedfs:
   spark_events:
   polaris_db_data:
+  spark_checkpoints:
+  checkpoints:

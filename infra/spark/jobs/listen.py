@@ -15,45 +15,42 @@ from pyspark.sql.functions import (
     current_timestamp
 )
 
-spark = (
-    SparkSession.builder
-    .appName("JobsKafkaIngestion")
-    .config("spark.sql.adaptive.enabled", "false")
-    .getOrCreate()
-)
+CHECKPOINT_LOCATION = "file:////opt/spark/events/bronze_jobs_ingestion"
 
-spark.sql("CREATE NAMESPACE IF NOT EXISTS warehouse.bronze");
+spark = SparkSession.builder.appName("JobsKafkaIngestion").getOrCreate()
+
+spark.sql("CREATE NAMESPACE IF NOT EXISTS bronze")
 
 spark.sql("""
-CREATE TABLE IF NOT EXISTS warehouse.bronze.jobs (
-    company STRING,
-    job_name STRING,
-    url STRING,
-    location STRING,
-    city STRING,
-    province STRING,
-    details STRING,
-    source STRING,
-    keyword STRING,
-    requirements ARRAY<STRING>,
-    skills ARRAY<STRING>,
-    benefits ARRAY<STRING>,
-    salary STRING,
-    publisher_name STRING,
-    applicant INTEGER,
-    quota INTEGER,
-    topic STRING,
-    kafka_key STRING,
-    kafka_partition INTEGER,
-    kafka_offset BIGINT,
-    kafka_timestamp TIMESTAMP,
-    publisher_last_online TIMESTAMP,
-    listing_date TIMESTAMP,
-    scraped_at TIMESTAMP,
-    ingested_at TIMESTAMP
-)
-USING iceberg
-PARTITIONED BY (truncate(1, company))
+    CREATE TABLE IF NOT EXISTS warehouse.bronze.jobs (
+        company STRING,
+        job_name STRING,
+        url STRING,
+        location STRING,
+        city STRING,
+        province STRING,
+        details STRING,
+        source STRING,
+        keyword STRING,
+        requirements ARRAY<STRING>,
+        skills ARRAY<STRING>,
+        benefits ARRAY<STRING>,
+        salary STRING,
+        publisher_name STRING,
+        applicant INTEGER,
+        quota INTEGER,
+        topic STRING,
+        kafka_key STRING,
+        kafka_partition INTEGER,
+        kafka_offset BIGINT,
+        kafka_timestamp TIMESTAMP,
+        publisher_last_online TIMESTAMP,
+        listing_date TIMESTAMP,
+        scraped_at TIMESTAMP,
+        ingested_at TIMESTAMP
+    )
+    USING iceberg
+    PARTITIONED BY (days(ingested_at), bucket(16, kafka_partition))
 """)
 
 schema = StructType([
@@ -78,36 +75,39 @@ schema = StructType([
     StructField('scraped_at', TimestampType()),
 ])
 
-df = spark \
-    .read \
-    .format("kafka") \
-    .option("kafka.bootstrap.servers", "broker:19092") \
-    .option("subscribe", "rawjobs") \
+df = (
+    spark.readStream
+    .format("kafka")
+    .option("kafka.bootstrap.servers", "broker:19092")
+    .option("subscribe", "rawjobs")
+    .option("startingOffsets", "earliest")
+    .option("failOnDataLoss", "false")
     .load()
-    
+)
+
 jobs = (
-        df
-        .select(
-            col("topic"),
-            col("key").cast("string").alias("kafka_key"),
-            col("partition").alias("kafka_partition"),
-            col("offset").alias("kafka_offset"),
-            col("timestamp").alias("kafka_timestamp"),
-            col("value").cast("string").alias("json")
-        )
-        .select(
-            "*",
-            from_json(col="json", schema=schema).alias("data")
-        )
-        .select(
-            "topic",
-            "kafka_key",
-            "kafka_partition",
-            "kafka_offset",
-            "kafka_timestamp",
-            "data.*"
-        )
+    df
+    .select(
+        col("topic"),
+        col("key").cast("string").alias("kafka_key"),
+        col("partition").alias("kafka_partition"),
+        col("offset").alias("kafka_offset"),
+        col("timestamp").alias("kafka_timestamp"),
+        col("value").cast("string").alias("json")
     )
+    .select(
+        "*",
+        from_json(col="json", schema=schema).alias("data")
+    )
+    .select(
+        "topic",
+        "kafka_key",
+        "kafka_partition",
+        "kafka_offset",
+        "kafka_timestamp",
+        "data.*"
+    )
+)
 
 cleaned_jobs = (
     jobs
@@ -117,54 +117,59 @@ cleaned_jobs = (
     .withColumn("ingested_at", current_timestamp())
 )
 
-final_job = (
-    cleaned_jobs
-    .select(
-        "company",
-        "job_name",
-        "url",
-        "location",
-        "city",
-        "province",
-        "details",
-        "source",
-        "keyword",
-        "requirements",
-        "skills",
-        "benefits",
-        "salary",
-        "publisher_name",
-        "applicant",
-        "quota",
-        "topic",
-        "kafka_key",
-        "kafka_partition",
-        "kafka_offset",
-        "kafka_timestamp",
-        "publisher_last_online",
-        "listing_date",
-        "scraped_at",
-        "ingested_at"
-    )
-    .drop_duplicates(["kafka_key"])
+final_job = cleaned_jobs.select(
+    "company",
+    "job_name",
+    "url",
+    "location",
+    "city",
+    "province",
+    "details",
+    "source",
+    "keyword",
+    "requirements",
+    "skills",
+    "benefits",
+    "salary",
+    "publisher_name",
+    "applicant",
+    "quota",
+    "topic",
+    "kafka_key",
+    "kafka_partition",
+    "kafka_offset",
+    "kafka_timestamp",
+    "publisher_last_online",
+    "listing_date",
+    "scraped_at",
+    "ingested_at"
 )
-        
+
+run_stats = {"total_upserted": 0, "batches": 0}
+
+
+def upsert_batch(batch_df: DataFrame, batch_id: int):
+    count = batch_df.count()
+    
+    batch_df.writeTo("warehouse.bronze.jobs").append()
+
+    run_stats["total_upserted"] += count
+    run_stats["batches"] += 1
+    print(f"[batch {batch_id}] appende {count} rows")
+
+
 query = (
-    final_job
-    .write
-    .format("iceberg")
-    .mode("append")
-    .save("warehouse.bronze.jobs")
+    final_job.writeStream
+    .foreachBatch(upsert_batch)
+    .option("checkpointLocation", CHECKPOINT_LOCATION)
+    .trigger(availableNow=True)
+    .start()
 )
+
+query.awaitTermination()
 
 print("done ingestion...")
-
-new_data = (spark.sql("""
-        SELECT 
-            summary['added-records'] AS added_records
-        FROM warehouse.bronze.jobs.snapshots
-        ORDER BY committed_at DESC LIMIT 1
-    """)
-    .first()['added_records']
+print(
+    f"affected {run_stats['total_upserted']} rows "
+    f"across {run_stats['batches']} micro-batch(es)"
 )
-print(f"affected {new_data} rows")

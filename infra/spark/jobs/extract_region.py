@@ -163,9 +163,13 @@ try:
         @pandas_udf(spark_return_type)
         def _udf(s: pd.Series) -> pd.Series:
             automaton = _get_automaton()
-
+            
             def find(text):
-                if text is None:
+                if pd.isna(text):
+                    return None
+            
+                text = str(text).strip()
+                if not text:
                     return None
                 return _best_match(automaton, text.lower())
 
@@ -235,23 +239,28 @@ try:
             when(col("location").isNotNull(), match_province(col("location")))
         )
         .withColumn("matched_province", 
-            when(col("matched_province").isNull(), match_province(col("job_province")))
-            .otherwise("matched_province")
+            when(
+            col("matched_province").isNull() & col("job_province").isNotNull(),
+            match_province(col("job_province")))
+            .otherwise(col("matched_province"))
         )
         .withColumn("matched_city", when(col("clean_location").isNotNull(), match_city(col("clean_location"))))
         .withColumn("matched_city", 
-            when(col("matched_city").isNull(), match_city(col("job_city")))
-            .otherwise("matched_city")
+            when(col("matched_city").isNull() & col("job_city").isNotNull(),
+            match_city(col("job_city")))
+            .otherwise(col("matched_city"))
         )
         .withColumn("matched_district_city_id", when(col("clean_location").isNotNull(), match_district(col("clean_location"))))
         .withColumn("matched_district_city_id", 
-            when(col("matched_district_city_id").isNull(), match_district(col("job_city")))
-            .otherwise("matched_district_city_id")
+            when(col("matched_district_city_id").isNull() & col("job_city").isNotNull(),
+            match_district(col("job_city")))
+            .otherwise(col("matched_district_city_id"))
         )
         .withColumn("matched_village_district_id", when(col("clean_location").isNotNull(), match_village(col("clean_location"))))
         .withColumn("matched_village_district_id", 
-            when(col("matched_village_district_id").isNull(), match_village(col("job_city")))
-            .otherwise("matched_village_district_id")
+            when(col("matched_village_district_id").isNull() & col("job_city").isNotNull(),
+            match_village(col("job_city")))
+            .otherwise(col("matched_village_district_id"))
         )
     )
 
