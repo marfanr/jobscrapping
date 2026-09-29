@@ -52,7 +52,7 @@ try:
     def detect_Language(df: pd.Series) -> pd.Series:
         nlp, m = get_spacy_phrase_matcher(broadcast_keywords.value)
         results = []
-        for doc in nlp.pipe(str.lower(df.fillna("").astype(str)), batch_size=256):
+        for doc in nlp.pipe((df.fillna("").astype(str).str.lower()), batch_size=256):
             matches  = m(doc)
             term = list(set(
                 doc[s:e].text.strip() for _, s, e in matches
@@ -98,11 +98,12 @@ try:
     sql = (
         raw_jobs
         .select(
+            "kafka_key",
             "details"
         )
     )
     
-    spec = Window.partitionBy(col("kafka_key")).orderBy(col("now").desc())
+    spec = Window.partitionBy("kafka_key").orderBy(col("now").desc())
     incoming_lang = (
         sql
         .withColumn("languages", 
@@ -126,13 +127,13 @@ try:
     WHEN MATCHED THEN
         UPDATE SET
             j.languages = array_union(
-                colaesce(j.languages, array()),
-                colaesce(i.languages, array())
+                coalesce(j.languages, array()),
+                coalesce(i.languages, array())
             ),
             j.updated_at = i.now
     WHEN NOT MATCHED THEN
-        INSERT *
-        VALUE (i.kafka_key, i.languages, i.now)
+        INSERT (kafka_key, languages, updated_at)
+        VALUES (i.kafka_key, i.languages, i.now)
     """)
     
     spark.sql(f"""

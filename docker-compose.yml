@@ -951,8 +951,6 @@ services:
         mkdir -p /opt/airflow/logs/dag_processor_manager
         chmod -R 777 /opt/airflow/logs
 
-  # AIRFLOW STANDALONE
-  # One container runs API server, scheduler, dag processor and triggerer.
   airflow:
     build:
       context: .
@@ -1118,6 +1116,152 @@ services:
       TRINO_CLIENT_ID: ${TRINO_CLIENT_ID}
       TRINO_CLIENT_SECRET: ${TRINO_CLIENT_SECRET}
 
+  clickhouse:
+    image: clickhouse/clickhouse-server:latest
+    container_name: clickhouse
+    hostname: clickhouse
+    restart: unless-stopped
+
+    mem_limit: 1500m
+    cpus: 0.6
+
+    ports:
+      - "8123:8123"
+      - "9001:9000"
+
+    environment:
+      CLICKHOUSE_DB: jobscrapper
+      CLICKHOUSE_USER: admin
+      CLICKHOUSE_PASSWORD: admin
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+      - clickhouse_logs:/var/log/clickhouse-server
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - wget --no-verbose --tries=1 --spider http://localhost:8123/ping || exit 1
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+
+    # SUPERSET
+  superset-db:
+    image: postgres:16
+    container_name: superset-db
+    hostname: superset-db
+    restart: unless-stopped
+
+    mem_limit: 256m
+    cpus: 0.2
+
+    environment:
+      POSTGRES_USER: superset
+      POSTGRES_PASSWORD: ${SUPERSET_DB_PASSWORD:-superset_password}
+      POSTGRES_DB: superset
+
+    volumes:
+      - superset_db_data:/var/lib/postgresql/data
+
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U superset -d superset
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  superset-init:
+    build:
+      context: .
+      dockerfile: ./infra/superset/Dockerfile
+    image: jobscrapper-superset:0.1
+    container_name: superset-init
+    restart: "no"
+
+    mem_limit: 768m
+    cpus: 0.5
+
+    depends_on:
+      superset-db:
+        condition: service_healthy
+
+    environment: &superset-environment
+      SUPERSET_CONFIG_PATH: /app/pythonpath/superset_config.py
+      SUPERSET_SECRET_KEY: ${SUPERSET_SECRET_KEY:-change_this_to_a_long_random_string}
+      SUPERSET_DB_PASSWORD: ${SUPERSET_DB_PASSWORD:-superset_password}
+      SUPERSET_LOAD_EXAMPLES: "no"
+
+    volumes:
+      - ./infra/superset/superset_config.py:/app/pythonpath/superset_config.py:ro
+
+    command:
+      - /bin/sh
+      - -c
+      - |
+        set -e
+        superset db upgrade
+        superset fab create-admin \
+          --username admin \
+          --firstname Admin \
+          --lastname Admin \
+          --email admin@example.com \
+          --password "$${SUPERSET_ADMIN_PASSWORD:-admin}" || true
+        superset init
+        echo "Superset init complete."
+
+  superset:
+    image: jobscrapper-superset:0.1
+    container_name: superset
+    hostname: superset
+    restart: unless-stopped
+
+    mem_limit: 1500m
+    cpus: 0.8
+
+    depends_on:
+      superset-init:
+        condition: service_completed_successfully
+      trino:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+
+    ports:
+      - "8088:8088"
+
+    environment: *superset-environment
+
+    volumes:
+      - ./infra/superset/superset_config.py:/app/pythonpath/superset_config.py:ro
+
+    command:
+      - gunicorn
+      - --bind=0.0.0.0:8088
+      - --workers=2
+      - --threads=4
+      - --timeout=120
+      - --limit-request-line=0
+      - --limit-request-field_size=0
+      - "superset.app:create_app()"
+
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://localhost:8088/health')"
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 60s
 
 volumes:
   kafka_data:
@@ -1128,3 +1272,7 @@ volumes:
   polaris_db_data:
   spark_checkpoints:
   checkpoints:
+  clickhouse_data:
+  clickhouse_logs:
+  superset_home:
+  superset_db_data:

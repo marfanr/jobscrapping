@@ -4,3 +4,4 @@ __pycache__
 prometheus
 data
 .env
+clickhouse

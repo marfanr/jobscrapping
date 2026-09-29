@@ -1,7 +1,7 @@
 trino:
-  target: prod
+  target: gold
   outputs:
-    prod:
+    gold:
       type: trino
       user: admin
       host: trino
@@ -9,3 +9,4 @@ trino:
       catalog: iceberg
       schema: gold
       threads: 2
+  

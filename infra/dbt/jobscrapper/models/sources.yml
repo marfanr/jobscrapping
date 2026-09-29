@@ -6,6 +6,8 @@ sources:
     schema: bronze
     tables:
       - name: jobs
+      - name: jobs_entries
+        identifier: "jobs$entries"
 
   - name: silver
     database: iceberg
@@ -20,3 +22,4 @@ sources:
     tables:
       - name: seed_villages
       
+  
