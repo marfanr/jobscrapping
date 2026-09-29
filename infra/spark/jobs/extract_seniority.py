@@ -29,7 +29,8 @@ PATTERNS = {
         [{"LOWER": {"IN": ["freshgrad", "freshgraduate", "fresh-graduate"]}}],
         [{"LOWER": "entry"}, {"TEXT": "-", "OP": "?"}, {"LOWER": "level"}],
         [{"LOWER": "no"}, {"LOWER": {"IN": ["prior", "previous", "relevant"]}, "OP": "?"},
-         {"LOWER": "experience"}],
+         {"LOWER": "experience"},],
+        [{"LOWER": {"IN": ["intern", "internship", "magang"]}}],
     ],
     "mid_level": [
         [NUM, RANGE_SEP, NUM, YEARS],
