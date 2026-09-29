@@ -6,7 +6,7 @@ from ..loader import registerJob
 from ..jobscrapper import Jobscrapper
 from ..utils import get_text
 import random
-
+import uuid
 @registerJob("jobstreet")
 class JobStreetScrapper:
     def __init__(
@@ -28,32 +28,31 @@ class JobStreetScrapper:
         
         target_markets = jstreet['target_market']
         random.shuffle(target_markets)
-           
+        
         for target in target_markets:
-            keywoard = target["keywoard"]
+            keyword = target["keywoard"]
             locations = target["locations"]
             random.shuffle(locations)
             for loc in locations:
                 try:
-                    print(keywoard, loc)
-                    await self.scrap_job(keywoard, loc)
-                except Exception:
-                    print("error ... continued")
+                    await self.scrap_job(keyword, loc)
+                except KeyboardInterrupt:
+                    pass
+                except Exception as e:
+                    print(f"err {e}")
         
         
     
-    async def scrap_job(self, keywoard, location):
+    async def scrap_job(self, keyword, location):
         page = await self.scrapper.context.new_page()
         try:
-            job = keywoard.replace(' ', '-')
+            job = keyword.replace(' ', '-')
             url = f"https://id.jobstreet.com/id/{job}-jobs/in-{location}?page=1"
             await page.goto(
                 url,
                 wait_until="domcontentloaded",
                 timeout=60000
             )
-            print(url)
-            
             await page.wait_for_selector("#app", timeout=60000, state="attached")
         
             # Total jobs
@@ -76,11 +75,9 @@ class JobStreetScrapper:
                 "[data-automation='search-result-job-list']"
             )
             job_lists = posts.locator(":scope > *")
-            count = await job_lists.count()
-            print(f"found result job list {count}")
 
             for job in await job_lists.all():
-                await self.gather_job_data(job, self.scrapper.context, keywoard)
+                await self.gather_job_data(job, self.scrapper.context, keyword)
 
         except asyncio.CancelledError:
             pass
@@ -88,7 +85,7 @@ class JobStreetScrapper:
         finally:
             await page.close()
             
-    async def gather_job_data(self, job: Locator, context, keywoard):
+    async def gather_job_data(self, job: Locator, context, keyword):
         job_name = await get_text(
                     job.locator("h3")
                 )
@@ -145,10 +142,14 @@ class JobStreetScrapper:
                 "listing_date": joblisting_date,
                 "details": details_content,
                 "source": "jobstreet",
-                "keywoard": str.lower(keywoard)
+                "keyword": str.lower(keyword)
             }
             
-            # publish kafka
-            self.scrapper.producer.send('rawjobs', gathered_job)
+            kafka_key = uuid.uuid5(uuid.NAMESPACE_URL, job_url).hex
+            print(f"{kafka_key} receive: {job_name} at {company} from {location} (jobstreet)")
+            
+            self.scrapper.producer.send('rawjobs', gathered_job, kafka_key.encode("utf-8"))
+            return
+            
         finally:
             await newpage.close()

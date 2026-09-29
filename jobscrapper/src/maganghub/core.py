@@ -1,5 +1,5 @@
 import asyncio
-from playwright.async_api import async_playwright, Locator
+from playwright.async_api import async_playwright, Locator, Error as PwError
 
 from ..loader import registerJob
 from ..jobscrapper import Jobscrapper
@@ -9,6 +9,7 @@ from zoneinfo import ZoneInfo
 
 import random
 import requests
+import uuid
 
 
 @registerJob("maganghub")
@@ -69,16 +70,19 @@ class MaganghubScrapper:
                     print(f"error ... {e}\n")
 
     async def scrap_job(self, keyword, location, idx: int = 1):
-        loc_obj = None
+        city_obj = None
         for _, v in enumerate(self.maganghub_cities):
             if location in v["name"]:
-                loc_obj = v
+                city_obj = v
                 
-        prov_id = loc_obj["province_id"]
+        prov_id = city_obj["province_id"]
         prov_obj = None
         for _, v in enumerate(self.maganghub_provinces):
             if prov_id in v["id"]:
                 prov_obj = v
+        
+        if not prov_obj:
+            return
         
 
         page = await self.scrapper.context.new_page()
@@ -89,8 +93,16 @@ class MaganghubScrapper:
                 # f"?city_id%5B0%5D%5Bid%5D={loc_obj["id"]}"
                 # f"&city_id%5B0%5D%5Blabel%5D={loc_obj['name']}&page={idx}"
             )
-
-            await page.goto(url, wait_until="domcontentloaded", timeout=60000)
+            
+            for attempt in range(4):
+                try:
+                    await page.goto(url, wait_until="domcontentloaded", timeout=60000)
+                    break
+                except (PwError) as e:
+                    print(f"failed to open... retry {attempt}")
+                    if attempt == 3:
+                        raise
+                    await asyncio.sleep(3)
 
             max_pages_el = page.locator("nav[role='navigation'] li")
             max_pages = int(
@@ -132,7 +144,8 @@ class MaganghubScrapper:
                         works_day=works_day,
                         quota=quota,
                         applicant=applicant,
-                        location=prov_obj['name']
+                        province=prov_obj['name'],
+                        city=city_obj['name']
                     )
 
         finally:
@@ -149,69 +162,79 @@ class MaganghubScrapper:
         works_day: str,
         quota: int,
         applicant: int,
-        location: str
+        province: str,
+        city: str,
         ):
         applicant = applicant or 0
         applicant = applicant or 0
         works_day = works_day or 0
         
-        page = await self.scrapper.context.new_page()
-        try:
-            await page.goto(link, wait_until="domcontentloaded", timeout=60000)
-            
-            details = ""
-            requirements = set()
-            
-            containers_loc = page.locator("div.mh-container.py-8 section")
-            for c in await containers_loc.all():
-                h2 = await c.locator("h2").inner_text()
-                if h2 is not None:
-                    if "Deskripsi Lowongan" in h2:
-                        content = await c.locator("p").first.inner_text()
-                        details += content
-                    
-                    elif "Kualifikasi" in h2:
-                        content = await c.locator("span.text-muted-foreground").all_inner_texts()
-                        for c in content:
-                            requirements.add(c)   
+        for attempt in range(4):
+            try:
+                page = await self.scrapper.context.new_page()
+                await page.goto(link, wait_until="domcontentloaded", timeout=60000)
+                
+                details = ""
+                requirements = set()
+                maps_detail = None
+                                
+                containers_loc = page.locator("div.mh-container.py-8 section")
+                for c in await containers_loc.all():
+                    h2 = await c.locator("h2").inner_text()
+                    if h2 is not None:
+                        if "Deskripsi Lowongan" in h2:
+                            content = await c.locator("p").first.inner_text()
+                            details += content
                         
-                    elif "Skill yang Bakal Kamu Dapat" in h2:
-                        items = c.locator("div.flex.items-start.gap-3.p-3")
-                        for i in await items.all():
-                            name = await i.locator("div.text-sm.font-medium").inner_text()
-                            flex = i.locator("div.flex.flex-wrap")
-                            tipe = await flex.locator("span.capitalize").inner_text()
-                            timeline = await get_text(flex.locator("span").nth(1))
-                            content = await get_text(i.locator("p.text-xs.text-muted-foreground"))
-
-                            details += f"{name}\n{tipe}-{timeline}\n{content}\n\n"
+                        elif "Kualifikasi" in h2:
+                            content = await c.locator("span.text-muted-foreground").all_inner_texts()
+                            for c in content:
+                                requirements.add(c)   
                             
-                    elif "Lokasi Magang" in h2:
-                        loc =  c.locator("iframe[title='Google Map Embed']")
-                        location = None
-                        if await loc.count() > 0:
-                            details += await loc.get_attribute("src")
+                        elif "Skill yang Bakal Kamu Dapat" in h2:
+                            items = c.locator("div.flex.items-start.gap-3.p-3")
+                            for i in await items.all():
+                                name = await i.locator("div.text-sm.font-medium").inner_text()
+                                flex = i.locator("div.flex.flex-wrap")
+                                tipe = await flex.locator("span.capitalize").inner_text()
+                                timeline = await get_text(flex.locator("span").nth(1))
+                                content = await get_text(i.locator("p.text-xs.text-muted-foreground"))
 
-            now = datetime.now(ZoneInfo(self.tz))
-            gathered_job = {
-                "job_name": job_name,
-                "url": link,
-                "location": location,
-                "details": details,
-                "source": "maganghub",
-                "requirements": ", ".join(list(requirements)),
-                "company": company_name,
-                "keyword": str.lower(field),
-                "applicant": applicant,
-                "quota": quota,
-                "scraped_at": now.isoformat(),
-            }
+                                details += f"{name}\n{tipe}-{timeline}\n{content}\n\n"
+                                
+                        elif "Lokasi Magang" in h2:
+                            loc =  c.locator("iframe[title='Google Map Embed']")
+                            if await loc.count() > 0:
+                                maps_detail = await loc.get_attribute("src")
+                                
+
+                now = datetime.now(ZoneInfo(self.tz))
+                gathered_job = {
+                    "job_name": job_name,
+                    "url": link,
+                    "province": province,
+                    "city": city,
+                    "details": details,
+                    "source": "maganghub",
+                    "requirements": ", ".join(list(requirements)),
+                    "company": company_name,
+                    "keyword": str.lower(field),
+                    "applicant": applicant,
+                    "quota": quota,
+                    "maps_detail": maps_detail,
+                    "scraped_at": now.isoformat(),
+                }
+                kafka_key = uuid.uuid5(uuid.NAMESPACE_URL, link).hex
+                print(f"{kafka_key} receive: {job_name} at {company_name} from {city} {province} (maganghub)")
+                self.scrapper.producer.send('rawjobs', gathered_job, kafka_key.encode("utf-8"))
+                return
+                
+            except (PwError):
+                print(f"failed to open... retry {attempt}")
+                if attempt == 3:
+                    raise
+                await asyncio.sleep(3)
             
-            print(f"receive: {job_name} at {company_name} (maganghub)")
-
-            # publish kafka
-            self.scrapper.producer.send('rawjobs', gathered_job, link.encode("utf-8"))
-               
-        # except     
-        finally:
-            await page.close()
+            finally:
+                await page.close()
+                

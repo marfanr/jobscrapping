@@ -67,7 +67,6 @@ class Jobscrapper:
                         print(f"[JOB ERROR] {e}")
 
             await self._wait_tasks()
-
         except KeyboardInterrupt:
             print("Shutdown signal received, cleaning up...")
             await self._cleanup(timeout=30, force_after=True)
@@ -112,13 +111,6 @@ class Jobscrapper:
 
         self.bg_task.clear()
 
-        if self.context:
-            try:
-                await asyncio.wait_for(self.context.close(), timeout=5)
-            except Exception as e:
-                print(f"[CLEANUP] Context close error: {e}")
-            finally:
-                self.context = None
 
         if self.browser:
             try:
