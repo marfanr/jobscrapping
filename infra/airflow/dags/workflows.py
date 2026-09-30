@@ -45,7 +45,7 @@ execution_config = ExecutionConfig(
 with DAG(
     dag_id="spark_warehouse",
     start_date=datetime(2026, 1, 1),
-    schedule="*/15 * * * *",
+    # schedule="*/15 * * * *",
     catchup=False,
     default_args=default_args,
     tags=["spark", "iceberg", "dbt", "warehouse"],

@@ -1,10 +1,22 @@
 {{ config(
     materialized = 'incremental',
-    incremental_strategy = 'append',
+    incremental_strategy = 'merge',
+    unique_key = 'job_id',
     schema = 'silver'
 ) }}
 
-WITH src AS (
+{% set max_seq = 0 %}
+{% if is_incremental() %}
+    {% set query %}
+    SELECT coalesce(max(sequence_number), 0) FROM {{ this }}
+    {% endset %}
+    {% set results = run_query(query) %}
+    {% if execute %}
+        {% set max_seq = results.columns[0][0] %}
+    {% endif %}
+{% endif %}
+
+WITH raw_data AS (
     SELECT
         j.kafka_key,
         j.company,
@@ -19,28 +31,34 @@ WITH src AS (
         j.publisher_last_online,
         j.ingested_at,
         e.snapshot_id,
-        e.sequence_number,
-        ROW_NUMBER() OVER (
-            PARTITION BY j.job_name, j.company, j.url
-            ORDER BY j.ingested_at DESC
-        ) AS rn
+        e.sequence_number
     FROM {{ source('bronze', 'jobs_entries') }} e
     JOIN {{ source('bronze', 'jobs') }} j
         ON j."$path" = e.data_file.file_path
     WHERE e.status = 1
+    AND e.sequence_number > {{max_seq}}
+),
 
-    {% if is_incremental() %}
-        AND e.sequence_number > (SELECT COALESCE(MAX(sequence_number), 0) FROM {{ this }})
-    {% endif %}
+deduped AS (
+    SELECT
+        *,
+        to_hex(md5(to_utf8(CAST(job_name || company || url AS VARCHAR)))) AS job_id,
+        ROW_NUMBER() OVER (
+            PARTITION BY job_name, company, url
+            ORDER BY ingested_at DESC, sequence_number DESC
+        ) AS rn
+    FROM raw_data
 )
 
 SELECT
+    job_id,
     kafka_key,
     company,
     job_name,
     keyword,
     source,
     applicant,
+    url,
     quota,
     publisher_name,
     listing_date,
@@ -48,5 +66,5 @@ SELECT
     ingested_at,
     snapshot_id,
     sequence_number
-FROM src
+FROM deduped
 WHERE rn = 1
