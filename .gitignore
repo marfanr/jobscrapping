@@ -1,4 +1,4 @@
-airflow/
+./airflow
 config
 __pycache__
 prometheus
