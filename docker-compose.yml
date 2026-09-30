@@ -1087,7 +1087,7 @@ services:
         /home/airflow/.local/bin/dbt seed \
           --project-dir /dbt/jobscrapper \
           --profiles-dir /dbt/jobscrapper \
-          --target prod
+          --target gold
 
         echo "dbt seed complete."
 

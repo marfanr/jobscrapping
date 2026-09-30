@@ -21,7 +21,7 @@ WITH src AS (
         e.snapshot_id,
         e.sequence_number,
         ROW_NUMBER() OVER (
-            PARTITION BY j.job_name, j.company
+            PARTITION BY j.job_name, j.company, j.url
             ORDER BY j.ingested_at DESC
         ) AS rn
     FROM {{ source('bronze', 'jobs_entries') }} e
