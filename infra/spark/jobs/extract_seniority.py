@@ -126,7 +126,10 @@ try:
     )
     USING ICEBERG
     TBLPROPERTIES (
-        'format-version'='2'
+        'format-version'='2',
+        'write.merge.mode'='merge-on-read',
+        'write.update.mode'='merge-on-read',
+        'write.delete.mode'='merge-on-read'
     )
     """)
 
@@ -198,14 +201,14 @@ try:
             VALUES (i.kafka_key, i.seniority, i.updated_at)
         """)
 
-    # spark.sql(f"""
-    # ALTER TABLE warehouse.silver.job_seniority
-    # SET TBLPROPERTIES (
-    #     'bronze.last_processed_snapshot_id' = '{latest_bronze_snapshot}'
-    # )
-    # """)
+    spark.sql(f"""
+    ALTER TABLE warehouse.silver.job_seniority
+    SET TBLPROPERTIES (
+        'bronze.last_processed_snapshot_id' = '{latest_bronze_snapshot}'
+    )
+    """)
 
-    # print(f"upserted rows: {n_rows}")
+    print(f"upserted rows: {n_rows}")
 
 except Exception as e:
     print(f"err: {type(e).__name__}: {e}", file=sys.stderr, flush=True)
