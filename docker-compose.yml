@@ -960,8 +960,6 @@ services:
     hostname: airflow
     restart: unless-stopped
 
-    # Conservative budget for a 2-vCPU / 16-GB host.
-    # LocalExecutor is limited to one concurrent task below.
     mem_limit: 4096m
     cpus: 1.5
 

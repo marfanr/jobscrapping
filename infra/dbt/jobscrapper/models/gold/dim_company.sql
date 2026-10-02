@@ -31,6 +31,7 @@ WITH raw_entries AS (
 
 deduped AS (
     SELECT
+        to_hex(md5(to_utf8(CAST(company AS VARCHAR)))) AS id,
         company,
         ingested_at,
         sequence_number,
@@ -41,8 +42,8 @@ deduped AS (
     FROM raw_entries
 )
 
-SELECT 
-    to_hex(md5(to_utf8(CAST(company AS VARCHAR)))) AS id,
+SELECT
+    id,
     company,
     ingested_at,
     sequence_number

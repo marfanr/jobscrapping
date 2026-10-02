@@ -14,7 +14,12 @@ sources:
     schema: silver
     tables:
       - name: job_skills_list
+      - name: job_skills_list_entries
+        identifier: "job_skills_list$entries"
       - name: job_majors_list
+      - name: job_majors_list_entries
+        identifier: "job_majors_list$entries"
+
 
   - name: seed
     database: iceberg
