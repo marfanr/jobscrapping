@@ -1193,8 +1193,6 @@ services:
         condition: service_completed_successfully
       trino:
         condition: service_healthy
-      clickhouse:
-        condition: service_healthy
 
     ports:
       - "8088:8088"

@@ -1,0 +1,39 @@
+iso_code,province_name,type
+ID-AC,Aceh,province
+ID-BA,Bali,province
+ID-BB,Kepulauan Bangka Belitung,province
+ID-BE,Bengkul,province
+ID-BT,Banten,province
+ID-GO,Gorontalo,province
+ID-JA,Jambi,province
+ID-JB,Jawa Barat,province
+ID-JI,Jawa Timur,province
+ID-JK,Jakarta Raya,capital district
+ID-JT,Jawa Tengah,province
+ID-KB,Kalimantan Barat,province
+ID-KI,Kalimantan Timur,province
+ID-KR,Kepulauan Riau,province
+ID-KS,Kalimantan Selatan,province
+ID-KT,Kalimantan Tengah,province
+ID-KU,Kalimantan Utara,province
+ID-LA,Lampung,province
+ID-MA,Maluku,province
+ID-MU,Maluku Utara,province
+ID-NB,Nusa Tenggara Barat,province
+ID-NT,Nusa Tenggara Timur,province
+ID-PA,Papua,province
+ID-PB,Papua Barat,province
+ID-PD,Papua Barat Daya,province
+ID-PE,Papua Pegunungan,province
+ID-PS,Papua Selatan,province
+ID-PT,Papua Tengah,province
+ID-RI,Riau,province
+ID-SB,Sumatera Barat,province
+ID-SG,Sulawesi Tenggara,province
+ID-SN,Sulawesi Selatan,province
+ID-SR,Sulawesi Barat,province
+ID-SS,Sumatera Selatan,province
+ID-ST,Sulawesi Tengah,province
+ID-SU,Sumatera Utara,province
+ID-VA,Nusantara,special region
+ID-YO,Yogyakarta,special region
