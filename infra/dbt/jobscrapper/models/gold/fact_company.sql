@@ -3,7 +3,7 @@
     incremental_strategy = 'merge',
     unique_key = 'id',
     schema = 'gold',
-    on_schema_change = 'sync_all_columns'
+    on_schema_change = 'append_new_columns'
 ) }}
 
 with raw_entries as (
@@ -12,6 +12,7 @@ with raw_entries as (
         j.kafka_key,
         r.province,
         j.company,
+        j.source,
         j.ingested_at,
         e.sequence_number
 
@@ -37,12 +38,16 @@ deduped as (
     select
         to_hex(md5(to_utf8(company))) as id,
         company,
+        source,
         province,
         ingested_at,
         sequence_number,
         row_number() over (
             partition by company
-            order by ingested_at desc, sequence_number desc
+            order by
+                ingested_at desc,
+                sequence_number desc,
+                kafka_key desc
         ) as rn
     from raw_entries
 )
@@ -50,7 +55,12 @@ deduped as (
 select
     d.id,
     d.company,
+    {% if is_incremental() %}
+    coalesce(d.province, t.province) as province,
+    {% else %}
     d.province,
+    {% endif %}
+    d.source,
     d.ingested_at,
     d.sequence_number
 from deduped d
@@ -58,7 +68,12 @@ from deduped d
 left join {{ this }} t
     on t.id = d.id
 where d.rn = 1
-  and (t.id is null or d.ingested_at >= t.ingested_at)
+  and (
+        t.id is null
+        or t.ingested_at is null
+        or d.ingested_at > t.ingested_at
+        or (d.ingested_at = t.ingested_at and d.sequence_number > t.sequence_number)
+      )
 {% else %}
 where d.rn = 1
 {% endif %}

@@ -11,6 +11,7 @@ with raw as (
     select
         s.skill,
         lower(r.province) as province,
+        j.source,
         count(distinct t.kafka_key) as job_count,
         max(t.updated_at) as updated_at,
         max(e.sequence_number) as sequence_number
@@ -25,6 +26,9 @@ with raw as (
     join {{ source('silver', 'job_region') }} r
         on t.kafka_key = r.kafka_key
 
+    join {{ source('silver', 'jobs') }} j
+        on j.kafka_key = t.kafka_key
+
     where e.status = 1
       and s.skill is not null
       and trim(s.skill) <> ''
@@ -35,12 +39,13 @@ with raw as (
       )
     {% endif %}
 
-    group by s.skill, lower(r.province)
+    group by s.skill, lower(r.province), j.source
 )
 
 select
     r.skill,
     r.province,
+    r.source,
     r.job_count
     {% if is_incremental() %}
         + coalesce(x.job_count, 0)
@@ -53,4 +58,5 @@ from raw r
 left join {{ this }} x
     on x.skill = r.skill
    and x.province = r.province
+   and x.source = r.source
 {% endif %}
