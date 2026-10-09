@@ -16,7 +16,7 @@ WITH delta AS (
     SELECT
         lower(r.province) AS province,
         s.major,
-        j.source,
+        jj.source,
         to_hex(md5(to_utf8(lower(r.province) || '|' || CAST(s.major AS VARCHAR)))) AS id,
         max(j.updated_at) AS updated_at,
         max(e.sequence_number) AS sequence_number,
@@ -27,10 +27,12 @@ WITH delta AS (
     CROSS JOIN UNNEST(j.majors) AS s(major)
     JOIN {{ source('silver', 'job_region') }} r
         ON j.kafka_key = r.kafka_key
+    JOIN {{ source('silver', 'jobs') }} jj
+        ON j.kafka_key = jj.kafka_key
     WHERE e.status = 1
       AND e.sequence_number > {{ max_sequence }}
     GROUP BY
-        lower(r.province), s.major, j.source
+        lower(r.province), s.major, jj.source
 )
 
 SELECT
