@@ -16,6 +16,7 @@ WITH delta AS (
     SELECT
         lower(r.province) AS province,
         s.major,
+        j.source,
         to_hex(md5(to_utf8(lower(r.province) || '|' || CAST(s.major AS VARCHAR)))) AS id,
         max(j.updated_at) AS updated_at,
         max(e.sequence_number) AS sequence_number,
@@ -29,23 +30,24 @@ WITH delta AS (
     WHERE e.status = 1
       AND e.sequence_number > {{ max_sequence }}
     GROUP BY
-        lower(r.province), s.major
+        lower(r.province), s.major, j.source
 )
 
 SELECT
     d.id,
     d.major,
+    d.source,
     d.province,
     {% if is_incremental() %}
-    d.job_count + coalesce(t.job_count, 0) AS job_count,
-    greatest(d.updated_at, coalesce(t.updated_at, d.updated_at)) AS updated_at,
+        d.job_count + coalesce(t.job_count, 0) AS job_count,
+        greatest(d.updated_at, coalesce(t.updated_at, d.updated_at)) AS updated_at,
     {% else %}
-    d.job_count,
-    d.updated_at,
+        d.job_count,
+        d.updated_at,
     {% endif %}
     d.sequence_number
 FROM delta d
 {% if is_incremental() %}
-LEFT JOIN {{ this }} t
-    ON t.id = d.id
+    LEFT JOIN {{ this }} t
+        ON t.id = d.id
 {% endif %}
