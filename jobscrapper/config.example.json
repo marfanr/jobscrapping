@@ -1,42 +1,141 @@
 {
     "browser_path": "",
-    "kafka_bootstrap": "broker:19092",
+    "kafka_bootstrap": "0.0.0.0:29092",
     "skill_list": "datasets/skills.csv",
     "majors_list": "datasets/majors.csv",
+    "proxy": {},
+    "zenrows": {
+        "key": ""
+    },
     "portals": {
         "jobstreet": {
-            "enable": true,
+            "enable": false,
             "target_market": [
                 {
                     "keywoard": "backend",
                     "locations": [
-                        "surabaya", "malang", "jakarta", "bandung", "yogyakarta", "sidoarjo"
+                        "surabaya",
+                        "malang",
+                        "jakarta",
+                        "bekasi",
+                        "jabodetabek",
+                        "singapore"
                     ]
                 },
                 {
-                    "keywoard": "data engineer",
+                    "keywoard": "data engineering",
                     "locations": [
-                        "surabaya", "malang", "jakarta", "bandung", "yogyakarta", "sidoarjo"
+                        "jakarta",
+                        "bekasi",
+                        "depok",
+                        "tangerang",
+                        "bogor",
+                        "bandung",
+                        "surabaya",
+                        "malang",
+                        "sidoarjo",
+                        "semarang",
+                        "yogyakarta",
+                        "solo",
+                        "medan",
+                        "palembang",
+                        "pekanbaru",
+                        "batam",
+                        "padang",
+                        "bandar lampung",
+                        "pontianak",
+                        "banjarmasin",
+                        "samarinda",
+                        "balikpapan",
+                        "makassar",
+                        "manado",
+                        "denpasar",
+                        "mataram",
+                        "jambi",
+                        "bengkulu",
+                        "serang",
+                        "cirebon",
+                        "kediri",
+                        "jabodetabek",
+                        "singapore"
                     ]
                 },
                 {
                     "keywoard": "data scientist",
                     "locations": [
-                        "surabaya", "malang", "jakarta", "bandung", "yogyakarta", "sidoarjo"
+                        "jakarta",
+                        "bekasi",
+                        "depok",
+                        "tangerang",
+                        "bogor",
+                        "bandung",
+                        "surabaya",
+                        "malang",
+                        "sidoarjo",
+                        "semarang",
+                        "yogyakarta",
+                        "solo",
+                        "medan",
+                        "palembang",
+                        "pekanbaru",
+                        "batam",
+                        "padang",
+                        "bandar lampung",
+                        "pontianak",
+                        "banjarmasin",
+                        "samarinda",
+                        "balikpapan",
+                        "makassar",
+                        "manado",
+                        "denpasar",
+                        "mataram",
+                        "jambi",
+                        "bengkulu",
+                        "serang",
+                        "cirebon",
+                        "kediri",
+                        "jabodetabek",
+                        "singapore"
                     ]
                 },
                 {
-                    "keywoard": "golang",
+                    "keywoard": "software developer",
                     "locations": [
-                        "surabaya", "malang", "jakarta", "bandung", "yogyakarta", "sidoarjo"
+                        "jakarta",
+                        "bekasi",
+                        "depok",
+                        "tangerang",
+                        "bogor",
+                        "bandung",
+                        "surabaya",
+                        "malang",
+                        "sidoarjo",
+                        "semarang",
+                        "yogyakarta",
+                        "solo",
+                        "medan",
+                        "palembang",
+                        "pekanbaru",
+                        "batam",
+                        "padang",
+                        "bandar lampung",
+                        "pontianak",
+                        "banjarmasin",
+                        "samarinda",
+                        "balikpapan",
+                        "makassar",
+                        "manado",
+                        "denpasar",
+                        "mataram",
+                        "jambi",
+                        "bengkulu",
+                        "serang",
+                        "cirebon",
+                        "kediri",
+                        "jabodetabek",
+                        "singapore"
                     ]
-                },
-                {
-                    "keywoard": "engineer",
-                    "locations": [
-                        "surabaya", "malang", "jakarta", "bandung", "yogyakarta", "sidoarjo"
-                    ]
-                }                
+                }
             ]
         },
         "glints": {
@@ -46,27 +145,60 @@
                     "keywoard": "backend",
                     "location_ids": [
                         "0822446a-8784-4af4-bc88-9f9294fca382",
-                        "JABODETABEK",
-                        "6ec28332-761a-4ee9-b0d8-52171a170edf"
+                        "6ec28332-761a-4ee9-b0d8-52171a170edf",
+                        "78d63064-78a1-4577-8516-036a6c5e903e",
+                        "ce7eb5cb-583a-40b2-b12b-0e17f59469e6",
+                        "dadb256b-8716-4fae-b7bf-f85d922d0df3",
+                        "c11f7fd1-6982-4bc6-8eef-36ca4909b663"
+                    ]
+                },
+                {
+                    "keywoard": "data engineer",
+                    "location_ids": [
+                        "0822446a-8784-4af4-bc88-9f9294fca382",
+                        "6ec28332-761a-4ee9-b0d8-52171a170edf",
+                        "78d63064-78a1-4577-8516-036a6c5e903e",
+                        "ce7eb5cb-583a-40b2-b12b-0e17f59469e6",
+                        "dadb256b-8716-4fae-b7bf-f85d922d0df3",
+                        "c11f7fd1-6982-4bc6-8eef-36ca4909b663"
+                    ]
+                },
+                {
+                    "keywoard": "data scientist",
+                    "location_ids": [
+                        "0822446a-8784-4af4-bc88-9f9294fca382",
+                        "6ec28332-761a-4ee9-b0d8-52171a170edf",
+                        "78d63064-78a1-4577-8516-036a6c5e903e",
+                        "ce7eb5cb-583a-40b2-b12b-0e17f59469e6",
+                        "dadb256b-8716-4fae-b7bf-f85d922d0df3",
+                        "c11f7fd1-6982-4bc6-8eef-36ca4909b663"
                     ]
                 }
             ]
         },
-        "disnakerja": {
-            "target_keywoard": [
-                "backend",
-                "data sciencetist",
-                "data engineer"
+        "linkedin": {
+            "enable": false,
+            "target_market": [
+                {
+                    "keyword": "backend",
+                    "locations": [
+                        "Surabaya", "malang", "jakarta"
+                    ],
+                    "max_search_pages": 1
+                }
             ]
         },
-        "linkedin": {
-            "priv": {
-                "APISID": "",
-                "li_at": ""
-            }
-        },
         "maganghub": {
-            
+            "enable": false,
+            "target_market": [
+                {
+                    "keyword": "backend",
+                    "locations": [
+                        "Surabaya"
+                    ],
+                    "max_search_pages": 1
+                }
+            ]
         }
     }
 }

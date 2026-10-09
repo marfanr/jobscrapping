@@ -6,6 +6,7 @@ from ..loader import registerJob
 from ..jobscrapper import Jobscrapper
 from ..utils import get_text
 import random
+import uuid
 
 @registerJob("glints")
 class GlintsScrapper:
@@ -107,16 +108,17 @@ class GlintsScrapper:
                 "requirements": ", ".join(list(requirements)),
                 "skills": ", ".join(list(skills)),
                 "benefits": ", ".join(list(benefits)),
-                "publisher": {
-                    "name": hrd_acc_name,
-                    "last_online": lastonline
-                },
+                "publisher_last_online": lastonline,
+                "publisher_name": hrd_acc_name,
                 "company": company_name,
-                "keywoard": str.lower(keywoard)
+                "keyword": str.lower(keywoard)
             }
+
+            kafka_key = uuid.uuid5(uuid.NAMESPACE_URL, link).hex
+            print(f"{kafka_key} receive: {job_name} at {company_name} from {location} (jobstreet)")
             
             # publish kafka
-            self.scrapper.producer.send('rawjobs', gathered_job)
+            self.scrapper.producer.send('rawjobs', gathered_job, kafka_key.encode("utf-8"))
             self._processed_jobs.add((job_name, company_name))
         
         finally:
