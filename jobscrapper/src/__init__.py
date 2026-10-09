@@ -1,9 +1,11 @@
 from .jobscrapper import Jobscrapper
 from . import jobstreet
 from .worker import Worker
+from .olap import Olap
 from . import glints
 from .linkedin import LinkedinScrapper
 from . import maganghub
+from .gold_tasks import JobDistribution
 
 __name__ = [
     Jobscrapper,
@@ -12,4 +14,6 @@ __name__ = [
     glints,
     LinkedinScrapper,
     maganghub
+    Olap,
+    JobDistribution
 ]

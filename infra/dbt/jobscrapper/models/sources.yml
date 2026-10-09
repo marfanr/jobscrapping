@@ -1,0 +1,36 @@
+version: 2
+
+sources:
+  - name: bronze
+    database: iceberg
+    schema: bronze
+    tables:
+      - name: jobs
+      - name: jobs_entries
+        identifier: "jobs$entries"
+
+  - name: silver
+    database: iceberg
+    schema: silver
+    tables:
+      - name: job_skills_list
+      - name: job_skills_list_entries
+        identifier: "job_skills_list$entries"
+      - name: job_majors_list
+      - name: job_majors_list_entries
+        identifier: "job_majors_list$entries"
+      - name: job_region
+      - name: job_region_entries
+        identifier: "job_region$entries"
+      - name: jobs
+      - name: jobs_entries
+        identifier: "jobs$entries"
+
+
+  - name: seed
+    database: iceberg
+    schema: seed
+    tables:
+      - name: seed_villages
+      - name: seed_iso3166_province
+  

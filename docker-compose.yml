@@ -1,0 +1,1238 @@
+version: "3.9"
+
+services:
+
+  # SEAWEEDFS
+  master:
+    image: chrislusf/seaweedfs
+    container_name: seaweedfs-master
+    hostname: master
+    restart: unless-stopped
+
+    mem_limit: 256m
+    cpus: 0.3
+
+    ports:
+      - "9333:9333"
+      - "19333:19333"
+      - "9324:9324"
+
+    command:
+      - master
+      - -ip=master
+      - -ip.bind=0.0.0.0
+      - -metricsPort=9324
+
+  volume:
+    image: chrislusf/seaweedfs
+    container_name: seaweedfs-volume
+    hostname: volume
+    restart: unless-stopped
+
+    mem_limit: 384m
+    cpus: 0.4
+
+    ports:
+      - "8080:8080"
+      - "18080:18080"
+      - "9325:9325"
+
+    command:
+      - volume
+      - -ip=volume
+      - -master=master:9333
+      - -ip.bind=0.0.0.0
+      - -port=8080
+      - -metricsPort=9325
+      - -dir=/data
+
+    volumes:
+      - seawedfs:/data
+
+    depends_on:
+      - master
+
+  filer:
+    image: chrislusf/seaweedfs
+    container_name: seaweedfs-filer
+    hostname: filer
+    restart: unless-stopped
+
+    mem_limit: 200m
+    cpus: 0.2
+
+    ports:
+      - "8888:8888"
+      - "18888:18888"
+      - "9326:9326"
+
+    command:
+      - filer
+      - -ip=filer
+      - -master=master:9333
+      - -ip.bind=0.0.0.0
+      - -metricsPort=9326
+
+    depends_on:
+      - master
+      - volume
+
+  s3:
+    image: chrislusf/seaweedfs
+    container_name: s3
+    hostname: s3
+    restart: unless-stopped
+
+    mem_limit: 200m
+    cpus: 0.2
+
+    depends_on:
+      - filer
+
+    command:
+      - s3
+      - -filer=filer:8888
+      - -config=/etc/seaweedfs/s3.json
+
+    ports:
+      - "8333:8333"
+
+    volumes:
+      - ./infra/seaweedfs/s3.json:/etc/seaweedfs/s3.json:ro
+
+  webdav:
+    image: chrislusf/seaweedfs
+    container_name: seaweedfs-webdav
+    restart: unless-stopped
+
+    mem_limit: 128m
+    cpus: 0.2
+
+    ports:
+      - "7333:7333"
+
+    command:
+      - webdav
+      - -filer=filer:8888
+
+    depends_on:
+      - master
+      - volume
+      - filer
+
+  admin:
+    image: chrislusf/seaweedfs
+    container_name: seaweedfs-admin
+    restart: unless-stopped
+
+    mem_limit: 128m
+    cpus: 0.2
+
+    ports:
+      - "23646:23646"
+
+    command:
+      - admin
+      - -master=master:9333
+
+    depends_on:
+      - master
+      - volume
+      - filer
+
+  # SEAWEEDFS INITIALIZATION
+  seawedfs-init:
+    image: amazon/aws-cli
+    container_name: seawedfs-init
+
+    mem_limit: 128m
+    cpus: 0.2
+
+    depends_on:
+      - s3
+
+    environment:
+      AWS_ACCESS_KEY_ID: admin
+      AWS_SECRET_ACCESS_KEY: password
+      AWS_DEFAULT_REGION: us-east-1
+
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        set -e
+
+        echo "Waiting for SeaweedFS S3..."
+
+        until aws s3api list-buckets \
+          --endpoint-url http://s3:8333 \
+          >/dev/null 2>&1
+        do
+          sleep 2
+        done
+
+        echo "SeaweedFS S3 is ready."
+
+        if ! aws s3api head-bucket \
+          --bucket rawjobs \
+          --endpoint-url http://s3:8333
+        then
+          echo "Creating rawjobs bucket..."
+
+          aws s3api create-bucket \
+            --bucket rawjobs \
+            --endpoint-url http://s3:8333
+        fi
+
+        if ! aws s3api head-bucket \
+          --bucket warehouse \
+          --endpoint-url http://s3:8333
+        then
+          echo "Creating warehouse bucket..."
+
+          aws s3api create-bucket \
+            --bucket warehouse \
+            --endpoint-url http://s3:8333
+        fi
+
+        echo "Buckets ready:"
+
+        aws s3api list-buckets \
+          --endpoint-url http://s3:8333
+
+  # PROMETHEUS
+  prometheus:
+    image: prom/prometheus:v2.21.0
+    container_name: prometheus
+    restart: unless-stopped
+
+    mem_limit: 256m
+    cpus: 0.3
+
+    ports:
+      - "9000:9090"
+
+    volumes:
+      - ./prometheus:/etc/prometheus:ro
+
+    command:
+      - --web.enable-lifecycle
+      - --config.file=/etc/prometheus/prometheus.yml
+
+    depends_on:
+      - s3
+
+  # APACHE POLARIS
+  polaris-db:
+    image: postgres:16
+    container_name: polaris-db
+    hostname: polaris-db
+    restart: unless-stopped
+
+    mem_limit: 384m
+    cpus: 0.4
+
+    environment:
+      POSTGRES_USER: polaris
+      POSTGRES_PASSWORD: polaris_password
+      POSTGRES_DB: polaris
+
+    volumes:
+      - polaris_db_data:/var/lib/postgresql/data
+
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U polaris -d polaris
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  polaris-bootstrap:
+    image: apache/polaris-admin-tool:latest
+    container_name: polaris-bootstrap
+    restart: "no"
+
+    mem_limit: 384m
+    cpus: 0.3
+
+    depends_on:
+      polaris-db:
+        condition: service_healthy
+
+    environment:
+      POLARIS_PERSISTENCE_TYPE: relational-jdbc
+      QUARKUS_DATASOURCE_USERNAME: polaris
+      QUARKUS_DATASOURCE_PASSWORD: polaris_password
+      QUARKUS_DATASOURCE_JDBC_URL: jdbc:postgresql://polaris-db:5432/polaris
+
+    command:
+      - bootstrap
+      - -r
+      - POLARIS
+      - -c
+      - POLARIS,root,s3cret
+
+
+  polaris:
+    image: apache/polaris:latest
+    container_name: iceberg-polaris
+    hostname: polaris
+    restart: unless-stopped
+
+    mem_limit: 768m
+    cpus: 0.6
+
+    ports:
+      - "8181:8181"
+      - "8182:8182"
+
+    depends_on:
+      polaris-db:
+        condition: service_healthy
+
+      polaris-bootstrap:
+        condition: service_completed_successfully
+
+      seawedfs-init:
+        condition: service_completed_successfully
+
+    environment:
+      # polaris
+      polaris.realm-context.realms: "POLARIS"
+      quarkus.otel.sdk.disabled: "true"
+
+      # postgres
+      POLARIS_PERSISTENCE_TYPE: relational-jdbc
+      QUARKUS_DATASOURCE_DB_KIND: postgresql
+      QUARKUS_DATASOURCE_JDBC_URL: jdbc:postgresql://polaris-db:5432/polaris
+      QUARKUS_DATASOURCE_USERNAME: polaris
+      QUARKUS_DATASOURCE_PASSWORD: polaris_password
+
+      # S3 / SeaweedFS
+      AWS_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: admin
+      AWS_SECRET_ACCESS_KEY: password
+      AWS_ENDPOINT_URL: http://s3:8333
+
+      polaris.features."SUPPORTED_CATALOG_STORAGE_TYPES": '["S3"]'
+      polaris.features."ALLOW_SETTING_S3_ENDPOINTS": "true"
+      polaris.features."DROP_WITH_PURGE_ENABLED": "true"
+      polaris.features."ENFORCE_PRINCIPAL_CREDENTIAL_REQUIREMENT": "false"
+      polaris.features."ALLOW_UNEXTERNALIZED_METADATA": "true"
+      polaris.features."ALLOW_SPECIFYING_FILE_IO_IMPL": "true"
+      polaris.features."ENFORCE_CATALOG_STORAGE_TYPE": "true"
+
+    healthcheck:
+      test:
+        - CMD
+        - curl
+        - --fail
+        - http://localhost:8182/q/health
+
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 45s
+
+  # POLARIS INITIALIZATION
+  polaris-init:
+    image: alpine:3.21
+    container_name: polaris-init
+    restart: "no"
+
+    mem_limit: 128m
+    cpus: 0.2
+
+    depends_on:
+      polaris:
+        condition: service_healthy
+
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        set -eu
+
+        apk add --no-cache curl jq
+
+        POLARIS_URL="http://polaris:8181"
+
+        PRINCIPAL_NAME="warehouse-principal"
+        PRINCIPAL_ROLE="warehouse"
+        CATALOG_NAME="warehouse"
+        CATALOG_ROLE="warehouse-catalog-role"
+
+        echo "=========================================="
+        echo "Polaris initialization"
+        echo "=========================================="
+
+        # Get Polaris root token
+        echo "[1/6] Requesting Polaris token..."
+
+        TOKEN=$$(curl -sf \
+          -X POST \
+          "$${POLARIS_URL}/api/catalog/v1/oauth/tokens" \
+          -H "Content-Type: application/x-www-form-urlencoded" \
+          --user root:s3cret \
+          -d "grant_type=client_credentials" \
+          -d "scope=PRINCIPAL_ROLE:ALL" \
+          | jq -r '.access_token')
+
+        if [ -z "$${TOKEN}" ] || [ "$${TOKEN}" = "null" ]; then
+          echo "ERROR: Failed to obtain Polaris token."
+          exit 1
+        fi
+
+        echo "Token acquired."
+
+        AUTH_HEADER="Authorization: Bearer $${TOKEN}"
+
+        # Create service principal
+        echo ""
+        echo "[2/6] Creating principal: $${PRINCIPAL_NAME}"
+
+        HTTP_CODE=$$(curl -s \
+          -o /tmp/principal.json \
+          -w "%{http_code}" \
+          -X POST \
+          "$${POLARIS_URL}/api/management/v1/principals" \
+          -H "$${AUTH_HEADER}" \
+          -H "Content-Type: application/json" \
+          -d "{
+            \"name\": \"$${PRINCIPAL_NAME}\",
+            \"type\": \"SERVICE\"
+          }")
+
+        case "$${HTTP_CODE}" in
+          200|201)
+            echo "Principal created."
+
+            CLIENT_ID=$$(jq -r '.credentials.clientId // empty' /tmp/principal.json)
+            CLIENT_SECRET=$$(jq -r '.credentials.clientSecret // empty' /tmp/principal.json)
+
+            echo "Client ID:     $${CLIENT_ID}"
+            echo "Client Secret: $${CLIENT_SECRET}"
+            ;;
+
+          409)
+            echo "Principal already exists. Skipping creation."
+            echo "Existing credentials are not returned by Polaris."
+            ;;
+
+          *)
+            echo "ERROR: Failed to create principal."
+            cat /tmp/principal.json
+            exit 1
+            ;;
+        esac
+
+        # Create warehouse catalog
+        echo ""
+        echo "[3/6] Creating catalog: $${CATALOG_NAME}"
+
+        HTTP_CODE=$$(curl -s \
+          -o /tmp/catalog-response.json \
+          -w "%{http_code}" \
+          -X POST \
+          "$${POLARIS_URL}/api/management/v1/catalogs" \
+          -H "$${AUTH_HEADER}" \
+          -H "Content-Type: application/json" \
+          -d '{
+            "catalog": {
+              "name": "warehouse",
+              "type": "INTERNAL",
+              "properties": {
+                "default-base-location": "s3://warehouse/",
+                "s3.endpoint": "http://s3:8333",
+                "s3.path-style-access": "true"
+              },
+              "storageConfigInfo": {
+                "storageType": "S3",
+                "allowedLocations": [
+                  "s3://warehouse/"
+                ],
+                "endpoint": "http://s3:8333",
+                "pathStyleAccess": true,
+                "stsUnavailable": true,
+                "region": "us-east-1"
+              }
+            }
+          }')
+
+        case "$${HTTP_CODE}" in
+          200|201)
+            echo "Catalog created."
+            ;;
+
+          409)
+            echo "Catalog already exists. Skipping creation."
+            ;;
+
+          *)
+            echo "ERROR: Failed to create catalog."
+            cat /tmp/catalog-response.json
+            exit 1
+            ;;
+        esac
+
+        # Create principal role
+        echo ""
+        echo "[4/6] Creating principal role: $${PRINCIPAL_ROLE}"
+
+        HTTP_CODE=$$(curl -s \
+          -o /tmp/principal-role.json \
+          -w "%{http_code}" \
+          -X POST \
+          "$${POLARIS_URL}/api/management/v1/principal-roles" \
+          -H "$${AUTH_HEADER}" \
+          -H "Content-Type: application/json" \
+          -d "{
+            \"principalRole\": {
+              \"name\": \"$${PRINCIPAL_ROLE}\"
+            }
+          }")
+
+        case "$${HTTP_CODE}" in
+          200|201)
+            echo "Principal role created."
+            ;;
+
+          409)
+            echo "Principal role already exists."
+            ;;
+
+          *)
+            echo "ERROR: Failed to create principal role."
+            cat /tmp/principal-role.json
+            exit 1
+            ;;
+        esac
+
+        # Create catalog role + privilege
+
+        echo ""
+        echo "[5/6] Creating catalog role: $${CATALOG_ROLE}"
+
+        HTTP_CODE=$$(curl -s \
+          -o /tmp/catalog-role.json \
+          -w "%{http_code}" \
+          -X POST \
+          "$${POLARIS_URL}/api/management/v1/catalogs/$${CATALOG_NAME}/catalog-roles" \
+          -H "$${AUTH_HEADER}" \
+          -H "Content-Type: application/json" \
+          -d "{
+            \"catalogRole\": {
+              \"name\": \"$${CATALOG_ROLE}\"
+            }
+          }")
+
+        case "$${HTTP_CODE}" in
+          200|201)
+            echo "Catalog role created."
+            ;;
+
+          409)
+            echo "Catalog role already exists."
+            ;;
+
+          *)
+            echo "ERROR: Failed to create catalog role."
+            cat /tmp/catalog-role.json
+            exit 1
+            ;;
+        esac
+
+        echo ""
+        echo "Granting CATALOG_MANAGE_CONTENT..."
+
+        HTTP_CODE=$$(curl -s \
+          -o /tmp/grant.json \
+          -w "%{http_code}" \
+          -X PUT \
+          "$${POLARIS_URL}/api/management/v1/catalogs/$${CATALOG_NAME}/catalog-roles/$${CATALOG_ROLE}/grants" \
+          -H "$${AUTH_HEADER}" \
+          -H "Content-Type: application/json" \
+          -d '{
+            "grant": {
+              "type": "catalog",
+              "privilege": "CATALOG_MANAGE_CONTENT"
+            }
+          }')
+
+        case "$${HTTP_CODE}" in
+          200|201|204)
+            echo "CATALOG_MANAGE_CONTENT granted."
+            ;;
+
+          409)
+            echo "Grant already exists."
+            ;;
+
+          *)
+            echo "ERROR: Failed to grant catalog privilege."
+            cat /tmp/grant.json
+            exit 1
+            ;;
+        esac
+
+        # RBAC
+        echo ""
+        echo "[6/6] Connecting RBAC roles..."
+
+        echo "Assigning catalog role to principal role..."
+
+        HTTP_CODE=$$(curl -s \
+          -o /tmp/catalog-role-assignment.json \
+          -w "%{http_code}" \
+          -X PUT \
+          "$${POLARIS_URL}/api/management/v1/principal-roles/$${PRINCIPAL_ROLE}/catalog-roles/$${CATALOG_NAME}" \
+          -H "$${AUTH_HEADER}" \
+          -H "Content-Type: application/json" \
+          -d "{
+            \"catalogRole\": {
+              \"name\": \"$${CATALOG_ROLE}\"
+            }
+          }")
+
+        case "$${HTTP_CODE}" in
+          200|201|204)
+            echo "Catalog role assigned to principal role."
+            ;;
+
+          409)
+            echo "Catalog role assignment already exists."
+            ;;
+
+          *)
+            echo "ERROR: Failed to assign catalog role."
+            cat /tmp/catalog-role-assignment.json
+            exit 1
+            ;;
+        esac
+
+        echo "Assigning principal role to principal..."
+
+        HTTP_CODE=$$(curl -s \
+          -o /tmp/principal-role-assignment.json \
+          -w "%{http_code}" \
+          -X PUT \
+          "$${POLARIS_URL}/api/management/v1/principals/$${PRINCIPAL_NAME}/principal-roles" \
+          -H "$${AUTH_HEADER}" \
+          -H "Content-Type: application/json" \
+          -d "{
+            \"principalRole\": {
+              \"name\": \"$${PRINCIPAL_ROLE}\"
+            }
+          }")
+
+        case "$${HTTP_CODE}" in
+          200|201|204)
+            echo "Principal role assigned to principal."
+            ;;
+
+          409)
+            echo "Principal role assignment already exists."
+            ;;
+
+          *)
+            echo "ERROR: Failed to assign principal role."
+            cat /tmp/principal-role-assignment.json
+            exit 1
+            ;;
+        esac
+
+        echo ""
+        echo "=========================================="
+        echo "Polaris initialization completed."
+        echo "=========================================="
+
+  # SPARK MASTER
+  spark:
+    build:
+      context: .
+      dockerfile: ./infra/spark/Dockerfile
+    image: jobscrapper-spark:0.1
+
+    container_name: spark
+    hostname: spark
+    restart: unless-stopped
+
+    mem_limit: 1000m
+    cpus: 1
+
+    ports:
+      - "7077:7077"
+      - "8081:8080"
+
+    environment:
+      SPARK_NO_DAEMONIZE: "true"
+      SPARK_MASTER_HOST: "0.0.0.0"
+      SPARK_MASTER_PORT: "7077"
+      SPARK_MASTER_WEBUI_PORT: "8080"
+      HOME: /tmp
+
+    volumes:
+      - ./infra/spark/conf:/opt/spark/conf:ro
+      - ./infra/spark/jobs:/opt/spark/jobs:ro
+      - spark_events:/opt/spark/events
+      - checkpoints:/checkpoints
+
+    command:
+      - /opt/spark/sbin/start-master.sh
+
+    healthcheck:
+      test:
+        - CMD
+        - curl
+        - --fail
+        - http://localhost:8080
+
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+
+    depends_on:
+      polaris-init:
+        condition: service_completed_successfully
+
+  # SPARK WORKER
+  spark-worker:
+    build:
+      context: .
+      dockerfile: ./infra/spark/Dockerfile
+    image: jobscrapper-spark:0.1
+
+    container_name: spark-worker
+    hostname: spark-worker
+    restart: unless-stopped
+
+    mem_limit: 4g
+    cpus: 1.5
+
+    depends_on:
+      spark:
+        condition: service_healthy
+
+    ports:
+      - "8082:8081"
+
+    environment:
+      SPARK_NO_DAEMONIZE: "true"
+      SPARK_WORKER_HOST: "0.0.0.0"
+      SPARK_WORKER_PORT: "7078"
+      SPARK_WORKER_WEBUI_PORT: "8081"
+      SPARK_WORKER_CORES: "2"
+      SPARK_WORKER_MEMORY: "3g"
+      SPARK_WORKER_DIR: /opt/spark/work
+      HOME: /tmp
+
+    volumes:
+      - ./infra/spark/conf:/opt/spark/conf:ro
+      - ./infra/spark/jobs:/opt/spark/jobs:ro
+      - spark_events:/opt/spark/events
+      - ./infra/internal_data:/opt/data
+      - checkpoints:/checkpoints
+
+    command:
+      - /opt/spark/sbin/start-worker.sh
+      - spark://spark:7077
+
+    healthcheck:
+      test:
+        - CMD
+        - curl
+        - --fail
+        - http://localhost:8081
+
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+
+  spark-events-init:
+    image: alpine:3.21
+    container_name: spark-events-init
+    restart: "no"
+
+    mem_limit: 64m
+    cpus: 0.1
+
+    volumes:
+      - spark_events:/opt/spark/events
+
+    command:
+      - /bin/sh
+      - -c
+      - |
+        set -e
+
+        echo "Preparing Spark event log directory..."
+
+        mkdir -p /opt/spark/events
+        chmod 777 /opt/spark/events
+        chmod 777 /checkpoints
+
+        echo "Permissions:"
+        ls -ld /opt/spark/events
+
+        echo "Spark event directory ready."
+
+  spark-history:
+    image: apache/spark:4.1.3-scala2.13-java17-python3-r-ubuntu
+    container_name: spark-history
+    hostname: spark-history
+    restart: unless-stopped
+
+    mem_limit: 400m
+    cpus: 0.3
+
+    depends_on:
+      s3:
+        condition: service_started
+      seawedfs-init:
+        condition: service_completed_successfully
+
+    ports:
+      - "18081:18081"
+
+    environment:
+      SPARK_NO_DAEMONIZE: "true"
+      HOME: /tmp
+
+    volumes:
+      - ./infra/spark/conf:/opt/spark/conf:ro
+      - spark_events:/opt/spark/events
+
+    command:
+      - /opt/spark/sbin/start-history-server.sh
+
+    healthcheck:
+      test:
+        - CMD
+        - curl
+        - --fail
+        - http://localhost:18081
+
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+
+  # KAFKA
+  broker:
+    image: apache/kafka:latest
+    container_name: broker
+    hostname: broker
+    restart: unless-stopped
+
+    ports:
+      - "9092:9092"
+      - "29092:29092"
+
+    mem_limit: 700m
+    cpus: 0.5
+
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: >
+        INTERNAL://:19092,
+        EXTERNAL://:9092,
+        VPN://:29092,
+        CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: >
+        INTERNAL://broker:19092,
+        EXTERNAL://localhost:9092,
+        VPN://10.200.200.1:29092
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: >
+        INTERNAL:PLAINTEXT,
+        EXTERNAL:PLAINTEXT,
+        VPN:PLAINTEXT,
+        CONTROLLER:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@broker:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_LOG_RETENTION_HOURS: 2
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_NUM_PARTITIONS: 3
+
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+
+  broker_init:
+    image: apache/kafka:latest
+
+    mem_limit: 128m
+    cpus: 0.2
+
+    depends_on:
+      - broker
+    
+    entrypoint:
+      - /bin/bash
+    command:
+      - -c
+      - |
+        set -e
+
+        echo "Waiting for Kafka..."
+
+        until /opt/kafka/bin/kafka-topics.sh \
+          --bootstrap-server broker:19092 \
+          --list >/dev/null 2>&1; do
+          sleep 2
+        done
+
+        echo "Kafka is ready."
+
+        /opt/kafka/bin/kafka-topics.sh \
+          --bootstrap-server broker:19092 \
+          --create \
+          --if-not-exists \
+          --topic rawjobs \
+          --partitions 3 \
+          --replication-factor 1
+
+        echo "Topic rawjobs created."
+
+        /opt/kafka/bin/kafka-topics.sh \
+          --bootstrap-server broker:19092 \
+          --describe \
+          --topic rawjobs
+
+  # AIRFLOW POSTGRES
+  airflow-postgres:
+    image: postgres:16
+    container_name: airflow-postgres
+    hostname: airflow-postgres
+    restart: unless-stopped
+
+    mem_limit: 256m
+    cpus: 0.2
+
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow_password
+      POSTGRES_DB: airflow
+
+    volumes:
+      - airflow_postgres_data:/var/lib/postgresql/data
+
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U airflow -d airflow
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  # AIRFLOW LOG INIT
+  airflow-logs-init:
+    image: alpine:3.21
+    container_name: airflow-logs-init
+    restart: "no"
+
+    mem_limit: 64m
+    cpus: 0.1
+
+    volumes:
+      - airflow_logs:/opt/airflow/logs
+
+    command:
+      - /bin/sh
+      - -c
+      - |
+        set -e
+        mkdir -p /opt/airflow/logs/dag_processor_manager
+        chmod -R 777 /opt/airflow/logs
+
+  airflow:
+    build:
+      context: .
+      dockerfile: ./infra/airflow/Dockerfile
+    image: jobscrapper-airflow:0.1
+    container_name: airflow
+    hostname: airflow
+    restart: unless-stopped
+
+    mem_limit: 4096m
+    cpus: 1.5
+
+    depends_on:
+      airflow-postgres:
+        condition: service_healthy
+      airflow-logs-init:
+        condition: service_completed_successfully
+      broker:
+        condition: service_started
+      spark:
+        condition: service_healthy
+
+    ports:
+      - "3000:8080"
+
+    environment: &airflow-environment
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: >-
+        postgresql+psycopg2://airflow:airflow_password@airflow-postgres:5432/airflow
+
+      # Airflow 3 standalone uses the built-in SimpleAuthManager.
+      AIRFLOW__CORE__AUTH_MANAGER: airflow.api_fastapi.auth.managers.simple.simple_auth_manager.SimpleAuthManager
+      AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_USERS: "admin:admin"
+
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__CORE__PARALLELISM: "2"
+      AIRFLOW__CORE__MAX_ACTIVE_TASKS_PER_DAG: "1"
+      AIRFLOW__CORE__MAX_ACTIVE_RUNS_PER_DAG: "1"
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__CORE__FERNET_KEY: 8tJ0REESeLns1m5Z2lPab5MtYMyXpqBzEd3j6LPg_aI=
+
+      AIRFLOW__API__WORKERS: "1"
+      AIRFLOW__API__WORKER_TIMEOUT: "120"
+      AIRFLOW__API__HOST: "0.0.0.0"
+      AIRFLOW__API__PORT: "8080"
+
+      # Keep DAG parsing lightweight.
+      AIRFLOW__DAG_PROCESSOR__PARSING_PROCESSES: "1"
+      AIRFLOW__DAG_PROCESSOR__MIN_FILE_PROCESS_INTERVAL: "5"
+
+      # Small SQLAlchemy pool for the small VM.
+      AIRFLOW__DATABASE__SQL_ALCHEMY_POOL_SIZE: "3"
+      AIRFLOW__DATABASE__SQL_ALCHEMY_MAX_OVERFLOW: "2"
+      AIRFLOW__DATABASE__SQL_ALCHEMY_POOL_PRE_PING: "true"
+
+      AIRFLOW__LOGGING__BASE_LOG_FOLDER: /opt/airflow/logs
+      AIRFLOW__LOGGING__LOGGING_LEVEL: INFO
+
+      AIRFLOW__CORE__EXECUTION_API_SERVER_URL: "http://airflow:8080/execution/"
+      AIRFLOW__API_AUTH__JWT_SECRET: "airflow_jwt_secret_change_this"
+      AIRFLOW__API_AUTH__JWT_ISSUER: "airflow"
+      AIRFLOW__API__SECRET_KEY: "airflow_api_secret_change_this"
+
+      AIRFLOW_CONN_KAFKA_DEFAULT: kafka://broker:19092
+      AIRFLOW_CONN_SPARK_DEFAULT: spark://spark:7077
+      AIRFLOW_CONN_DOCKER_DEFAULT: >-
+        docker://?extra__docker__docker_url=unix%3A%2F%2Fvar%2Frun%2Fdocker.sock
+
+      DBT_TARGET_PATH: /tmp/dbt_target
+      DBT_LOG_PATH: /tmp/dbt_logs
+
+    volumes:
+      - ./infra/airflow/dags:/opt/airflow/dags:ro
+      - ./airflow/plugins:/opt/airflow/plugins
+      - airflow_logs:/opt/airflow/logs
+      - ./infra/spark/jobs:/jobs/spark:ro
+      - ./infra/spark/conf:/opt/spark/conf:ro
+      - spark_events:/opt/spark/events
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./infra/internal_data:/opt/data
+      - ./infra/dbt:/dbt:ro
+      - checkpoints:/checkpoints
+
+    command:
+      - airflow
+      - standalone
+
+    healthcheck:
+      test:
+        - CMD
+        - curl
+        - --fail
+        - http://localhost:8080/api/v2/monitor/health
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 45s
+
+  dbt-seed:
+    build:
+      context: .
+      dockerfile: ./infra/airflow/Dockerfile
+    image: jobscrapper-airflow:0.1
+    container_name: dbt-seed
+    restart: "no"
+
+    mem_limit: 256m
+    cpus: 0.3
+
+    depends_on:
+      trino:
+        condition: service_healthy
+      polaris-init:
+        condition: service_completed_successfully
+
+    environment:
+      DBT_TARGET_PATH: /tmp/dbt_target
+      DBT_LOG_PATH: /tmp/dbt_logs
+
+    volumes:
+      - ./infra/dbt:/dbt:ro
+
+    command:
+      - bash
+      - -c
+      - |
+        set -e
+
+        echo "=========================================="
+        echo "Running dbt seed"
+        echo "=========================================="
+
+        /home/airflow/.local/bin/dbt seed \
+          --project-dir /dbt/jobscrapper \
+          --profiles-dir /dbt/jobscrapper \
+          --target gold
+
+        echo "dbt seed complete."
+
+  trino:
+    image: trinodb/trino
+    container_name: trino
+    restart: unless-stopped
+
+    ports:
+      - "9090:8080"
+
+    mem_limit: 3000m
+    cpus: 1
+
+    volumes:
+      - ./infra/trino/coordinator:/etc/trino:ro
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/v1/info"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+
+    environment:
+      TRINO_CLIENT_ID: ${TRINO_CLIENT_ID}
+      TRINO_CLIENT_SECRET: ${TRINO_CLIENT_SECRET}
+
+    # SUPERSET
+  superset-db:
+    image: postgres:16
+    container_name: superset-db
+    hostname: superset-db
+    restart: unless-stopped
+
+    mem_limit: 256m
+    cpus: 0.2
+
+    environment:
+      POSTGRES_USER: superset
+      POSTGRES_PASSWORD: ${SUPERSET_DB_PASSWORD:-superset_password}
+      POSTGRES_DB: superset
+
+    volumes:
+      - superset_db_data:/var/lib/postgresql/data
+
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U superset -d superset
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  superset-init:
+    build:
+      context: .
+      dockerfile: ./infra/superset/Dockerfile
+    image: jobscrapper-superset:0.1
+    container_name: superset-init
+    restart: "no"
+
+    mem_limit: 768m
+    cpus: 0.5
+
+    depends_on:
+      superset-db:
+        condition: service_healthy
+
+    environment: &superset-environment
+      SUPERSET_CONFIG_PATH: /app/pythonpath/superset_config.py
+      SUPERSET_SECRET_KEY: ${SUPERSET_SECRET_KEY:-change_this_to_a_long_random_string}
+      SUPERSET_DB_PASSWORD: ${SUPERSET_DB_PASSWORD:-superset_password}
+      SUPERSET_LOAD_EXAMPLES: "no"
+
+    volumes:
+      - ./infra/superset/superset_config.py:/app/pythonpath/superset_config.py:ro
+
+    command:
+      - /bin/sh
+      - -c
+      - |
+        set -e
+        superset db upgrade
+        superset fab create-admin \
+          --username admin \
+          --firstname Admin \
+          --lastname Admin \
+          --email admin@example.com \
+          --password "$${SUPERSET_ADMIN_PASSWORD:-admin}" || true
+        superset init
+        echo "Superset init complete."
+
+  superset:
+    image: jobscrapper-superset:0.1
+    container_name: superset
+    hostname: superset
+    restart: unless-stopped
+
+    mem_limit: 1500m
+    cpus: 0.8
+
+    depends_on:
+      superset-init:
+        condition: service_completed_successfully
+      trino:
+        condition: service_healthy
+
+    ports:
+      - "8088:8088"
+
+    environment: *superset-environment
+
+    volumes:
+      - ./infra/superset/superset_config.py:/app/pythonpath/superset_config.py:ro
+
+    command:
+      - gunicorn
+      - --bind=0.0.0.0:8088
+      - --workers=2
+      - --threads=4
+      - --timeout=120
+      - --limit-request-line=0
+      - --limit-request-field_size=0
+      - "superset.app:create_app()"
+
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://localhost:8088/health')"
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 60s
+
+volumes:
+  kafka_data:
+  airflow_postgres_data:
+  airflow_logs:
+  seawedfs:
+  spark_events:
+  polaris_db_data:
+  spark_checkpoints:
+  checkpoints:
+  clickhouse_data:
+  clickhouse_logs:
+  superset_home:
+  superset_db_data:

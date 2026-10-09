@@ -1,0 +1,25 @@
+name: 'jobscrapper'
+version: '1.0.0'
+config-version: 2
+
+profile: 'trino'
+
+model-paths: ["models"]
+macro-paths: ["macros"]
+seed-paths: ["seeds"]
+target-path: "target"
+clean-targets: ["target", "dbt_packages"]
+
+models:
+  jobscrapper:
+    golds:
+      +schema: golds
+    silvers:
+      +schema: silver
+
+seeds:
+  jobscrapper:
+    +enabled: true
+    +schema: seed
+    +config:
+      +batch_size: 1000

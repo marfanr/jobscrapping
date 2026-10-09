@@ -1,5 +1,7 @@
-airflow/
+./airflow
 config
 __pycache__
-.vscode
-env
+prometheus
+data
+.env
+clickhouse

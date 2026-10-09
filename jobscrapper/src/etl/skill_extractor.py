@@ -10,7 +10,9 @@ class SkillsExtractor:
         pattern = [self.indonesia_nlp.make_doc(s) for s in self.skills_list]
         self.matcher.add("skills", pattern)
         
-    def extract(self, raw_data: str):
+    def extract(self, raw_data: str | None):  
+        if raw_data is None:
+            return None
         raw = raw_data.lower()
         raw_doc = self.indonesia_nlp(raw)
         
