@@ -25,6 +25,9 @@ sources:
       - name: jobs
       - name: jobs_entries
         identifier: "jobs$entries"
+      - name: job_salary
+      - name: job_salary_entries
+        identifier: "job_salary$entries"
 
 
   - name: seed

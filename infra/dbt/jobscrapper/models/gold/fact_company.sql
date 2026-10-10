@@ -56,24 +56,24 @@ select
     d.id,
     d.company,
     {% if is_incremental() %}
-    coalesce(d.province, t.province) as province,
+        coalesce(d.province, t.province) as province,
     {% else %}
-    d.province,
+        d.province,
     {% endif %}
     d.source,
     d.ingested_at,
     d.sequence_number
 from deduped d
 {% if is_incremental() %}
-left join {{ this }} t
-    on t.id = d.id
-where d.rn = 1
-  and (
-        t.id is null
-        or t.ingested_at is null
-        or d.ingested_at > t.ingested_at
-        or (d.ingested_at = t.ingested_at and d.sequence_number > t.sequence_number)
-      )
+    left join {{ this }} t
+        on t.id = d.id
+    where d.rn = 1
+    and (
+            t.id is null
+            or t.ingested_at is null
+            or d.ingested_at > t.ingested_at
+            or (d.ingested_at = t.ingested_at and d.sequence_number > t.sequence_number)
+        )
 {% else %}
-where d.rn = 1
+    where d.rn = 1
 {% endif %}
