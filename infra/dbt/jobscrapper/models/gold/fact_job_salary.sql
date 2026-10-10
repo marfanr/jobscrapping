@@ -16,7 +16,9 @@ with raw AS (
     SELECT 
         s.kafka_key,
         j.company,
+        j.job_name,
         j.source,
+        j.keyword,
         jr.province,
         jr.city,
         s.lower_salary,
@@ -40,7 +42,9 @@ with raw AS (
 dedup AS (
     SELECT
         company,
+        job_name,
         source,
+        keyword,
         province,
         city,
         lower_salary,
@@ -59,7 +63,9 @@ dedup AS (
 
 SELECT 
     d.company,
+    d.job_name,
     d.source,
+    d.keyword,
     d.province,
     d.city,
     {% if is_incremental() %}
